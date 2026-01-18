@@ -31,6 +31,25 @@ try:
     d = json.load(sys.stdin)
     c = d.get('counts', {})
     print(f\"  Pending: {c.get('pending', 0)}, Downloading: {c.get('downloading', 0)}, Completed: {c.get('completed', 0)}, Failed: {c.get('failed', 0)}\")
+    
+    # Show pending models
+    queue = d.get('queue', [])
+    pending = [m for m in queue if m.get('status') == 'pending']
+    if pending:
+        print()
+        print('  Queued models:')
+        for m in pending[:10]:  # Limit to 10
+            print(f\"    • {m.get('model')}\")
+        if len(pending) > 10:
+            print(f\"    ... and {len(pending) - 10} more\")
+    
+    # Show if any downloading
+    downloading = [m for m in queue if m.get('status') == 'downloading']
+    if downloading:
+        print()
+        print('  Currently downloading:')
+        for m in downloading:
+            print(f\"    ⬇ {m.get('model')}\")
 except:
     print('  Could not fetch queue status')
 " 2>/dev/null

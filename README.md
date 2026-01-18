@@ -1,6 +1,6 @@
 # ohhhllama
 
-**Version 1.0.4** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
+**Version 1.0.5** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
 
 **Bandwidth-friendly Ollama with download queuing**
 
@@ -57,6 +57,10 @@ Sun 2026-01-19 22:00:00 UTC  11h left
 
 === Queue Status ===
   Pending: 2, Downloading: 0, Completed: 5, Failed: 0
+
+  Queued models:
+    • llama2:70b
+    • codellama:34b
 
 === Disk Status ===
   Path: /data/ollama
