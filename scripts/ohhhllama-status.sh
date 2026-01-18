@@ -20,21 +20,22 @@ echo -n "Timer:     "; systemctl is-active ollama-queue.timer 2>/dev/null || ech
 echo -n "Ollama:    "; docker ps --filter "name=ollama" --format "{{.Status}}" 2>/dev/null || echo "unknown"
 echo ""
 
-echo -e "${YELLOW}=== Next Scheduled Download ===${NC}"
-# Get next run time from systemctl
-next_run=$(systemctl list-timers ollama-queue.timer --no-pager 2>/dev/null | grep ollama-queue | awk '{print $1, $2, $3}')
-time_left=$(systemctl list-timers ollama-queue.timer --no-pager 2>/dev/null | grep ollama-queue | awk '{print $4}')
-
-if [[ -n "$next_run" ]]; then
-    # Remove seconds from time (22:00:00 -> 22:00)
-    next_run_clean=$(echo "$next_run" | sed 's/:[0-9][0-9] / /')
-    echo "  ${next_run_clean} (${time_left} left)"
-else
-    echo "  Timer not active"
-fi
-echo ""
-
 echo -e "${YELLOW}=== Queue Status ===${NC}"
+
+# Get next run time - parse more carefully
+timer_info=$(systemctl list-timers ollama-queue.timer --no-pager 2>/dev/null | grep ollama-queue)
+if [[ -n "$timer_info" ]]; then
+    # Extract fields: NEXT is columns 1-3 (day date time), LEFT is column 4
+    next_day=$(echo "$timer_info" | awk '{print $1}')
+    next_date=$(echo "$timer_info" | awk '{print $2}')
+    next_time=$(echo "$timer_info" | awk '{print $3}' | cut -d: -f1,2)  # Remove seconds
+    time_left=$(echo "$timer_info" | awk '{print $4}')
+    echo "  Next download: ${next_day} ${next_date} ${next_time} UTC (${time_left} left)"
+else
+    echo "  Next download: Timer not active"
+fi
+
+# Queue counts and models
 curl -s http://localhost:11434/api/queue 2>/dev/null | python3 -c "
 import sys, json
 try:
