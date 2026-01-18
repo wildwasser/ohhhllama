@@ -53,7 +53,7 @@ Timer:     active
 Ollama:    Up 2 hours
 
 === Next Scheduled Download ===
-Sun 2026-01-19 22:00:00 UTC  11h left
+  Sun 2026-01-19 22:00 UTC (10h left)
 
 === Queue Status ===
   Pending: 2, Downloading: 0, Completed: 5, Failed: 0

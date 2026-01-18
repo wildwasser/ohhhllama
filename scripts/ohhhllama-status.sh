@@ -21,7 +21,17 @@ echo -n "Ollama:    "; docker ps --filter "name=ollama" --format "{{.Status}}" 2
 echo ""
 
 echo -e "${YELLOW}=== Next Scheduled Download ===${NC}"
-systemctl list-timers ollama-queue.timer --no-pager 2>/dev/null | grep -E "(NEXT|ollama)" || echo "Timer not active"
+# Get next run time from systemctl
+next_run=$(systemctl list-timers ollama-queue.timer --no-pager 2>/dev/null | grep ollama-queue | awk '{print $1, $2, $3}')
+time_left=$(systemctl list-timers ollama-queue.timer --no-pager 2>/dev/null | grep ollama-queue | awk '{print $4}')
+
+if [[ -n "$next_run" ]]; then
+    # Remove seconds from time (22:00:00 -> 22:00)
+    next_run_clean=$(echo "$next_run" | sed 's/:[0-9][0-9] / /')
+    echo "  ${next_run_clean} (${time_left} left)"
+else
+    echo "  Timer not active"
+fi
 echo ""
 
 echo -e "${YELLOW}=== Queue Status ===${NC}"
