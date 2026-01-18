@@ -1,6 +1,6 @@
 # ohhhllama
 
-**Version 1.0.3** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
+**Version 1.0.4** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
 
 **Bandwidth-friendly Ollama with download queuing**
 
@@ -8,14 +8,19 @@ Stop your Ollama server from downloading 70GB models during peak hours. ohhhllam
 
 ## Features
 
-- **Transparent Proxy** - Drop-in replacement for Ollama API on port 11434
-- **Download Queue** - Model pulls are queued, not executed immediately
-- **Off-Peak Processing** - Queue processes at 10 PM (configurable)
-- **Request Deduplication** - Same model requested 10 times? Downloaded once
-- **Rate Limiting** - Prevent abuse with per-IP daily limits
-- **SQLite Storage** - Simple, reliable, no external dependencies
-- **Full API Compatibility** - All other Ollama endpoints pass through unchanged
-- **OpenWebUI Compatible** - Queued models appear in model list and can be deleted
+- 🚀 **Transparent Proxy** - Drop-in replacement for Ollama API on port 11434
+- 📥 **Download Queue** - Model pulls are queued, not executed immediately  
+- 🌙 **Off-Peak Processing** - Queue processes at 10 PM (configurable via systemd timer)
+- 🔄 **Request Deduplication** - Same model requested 10 times? Downloaded once
+- 🛡️ **Rate Limiting** - Prevent abuse with per-IP daily limits (default: 5/day)
+- 💾 **External Storage** - Models stored on /data partition, not root filesystem
+- 📊 **Disk Monitoring** - Rejects new requests when disk is >90% full
+- 🏥 **Health Endpoint** - `/api/health` for monitoring integration
+- 👀 **Queue Visibility** - Queued models appear in `ollama list` with `[QUEUED]` tag
+- 🗑️ **Queue Management** - Delete queued models via API or OpenWebUI
+- 🖥️ **Status Command** - Run `ohhhllama` for instant status and command reference
+- 🔌 **OpenWebUI Compatible** - Full integration with OpenWebUI model management
+- 📦 **Zero Dependencies** - Python stdlib only, no pip packages needed
 
 ## Quick Start
 
@@ -32,20 +37,51 @@ cd ohhhllama
 sudo ./install.sh
 ```
 
-## Quick Reference
+## Status Command
 
-After installation, run `ohhhllama` from anywhere to see status and common commands:
+After installation, run `ohhhllama` from anywhere to see status and commands:
 
 ```bash
-ohhhllama
-```
+$ ohhhllama
+╔══════════════════════════════════════════════════════════════╗
+║                    ohhhllama - Quick Reference                ║
+╚══════════════════════════════════════════════════════════════╝
 
-This shows:
-- Service status (proxy, timer, Ollama container)
-- Current queue status
-- Disk usage
-- Common commands cheat sheet
-- Configuration file locations
+=== Service Status ===
+Proxy:     active
+Timer:     active
+Ollama:    Up 2 hours
+
+=== Next Scheduled Download ===
+Sun 2026-01-19 22:00:00 UTC  11h left
+
+=== Queue Status ===
+  Pending: 2, Downloading: 0, Completed: 5, Failed: 0
+
+=== Disk Status ===
+  Path: /data/ollama
+  Used: 12% | Free: 396.5 GB
+
+=== Common Commands ===
+  Queue a model:        curl http://localhost:11434/api/pull -d '{"name": "llama2"}'
+  View queue:           curl http://localhost:11434/api/queue
+  View models:          curl http://localhost:11434/api/tags
+  Health check:         curl http://localhost:11434/api/health
+  Remove from queue:    curl -X DELETE http://localhost:11434/api/queue -d '{"name": "model"}'
+  Process queue now:    sudo systemctl start ollama-queue.service
+
+=== Service Commands ===
+  Restart proxy:        sudo systemctl restart ollama-proxy
+  View proxy logs:      journalctl -u ollama-proxy -f
+  View queue logs:      journalctl -u ollama-queue.service -n 50
+  Check timer:          systemctl list-timers ollama-queue.timer
+
+=== Configuration ===
+  Config file:          /opt/ohhhllama/ohhhllama.conf
+  Timer schedule:       /etc/systemd/system/ollama-queue.timer
+  Queue database:       /var/lib/ohhhllama/queue.db
+  Model storage:        /data/ollama
+```
 
 ## Requirements
 

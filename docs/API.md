@@ -188,17 +188,111 @@ If the model already exists in Ollama, the request passes through to Ollama and 
 
 ---
 
-## Pass-Through Endpoints
+### GET /api/health
 
-All other Ollama API endpoints pass through unchanged. Here's a summary:
+Get comprehensive system health status.
+
+**Request:**
+```bash
+curl http://localhost:11434/api/health
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "checks": {
+    "proxy": {"status": "ok"},
+    "backend": {"status": "ok", "url": "http://127.0.0.1:11435"},
+    "disk": {"status": "ok", "path": "/data/ollama", "used_percent": 45, "free_gb": 248.5},
+    "database": {"status": "ok", "path": "/var/lib/ohhhllama/queue.db"}
+  },
+  "timestamp": "2026-01-18T15:30:00Z"
+}
+```
+
+**Response Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | string | Overall status: `healthy`, `degraded`, or `unhealthy` |
+| `checks.proxy` | object | Proxy status (always ok if responding) |
+| `checks.backend` | object | Ollama backend connectivity |
+| `checks.disk` | object | Disk space status and metrics |
+| `checks.database` | object | SQLite database status |
+| `timestamp` | string | ISO-8601 timestamp |
+
+**Status Values:**
+
+| Status | Description |
+|--------|-------------|
+| `healthy` | All systems operational |
+| `degraded` | Non-critical issues (disk warning, database error) |
+| `unhealthy` | Critical issues (backend down, disk critical) |
+
+**Disk Status Values:**
+
+| Status | Condition |
+|--------|-----------|
+| `ok` | Usage < threshold - 10% |
+| `warning` | Usage >= threshold - 10% but < threshold |
+| `critical` | Usage >= threshold (default 90%) |
+
+---
+
+## Modified Endpoints
+
+These Ollama endpoints have modified behavior in ohhhllama.
 
 ### GET /api/tags
 
-List available models.
+List available models. **Modified** to include queued models.
 
+**Request:**
 ```bash
 curl http://localhost:11434/api/tags
 ```
+
+**Behavior:**
+- Fetches real models from Ollama backend
+- Queries pending models from download queue
+- Merges queued models into response with `* [QUEUED]` name prefix
+- Queued models appear in OpenWebUI and `ollama list`
+
+**Response (with queued models):**
+```json
+{
+  "models": [
+    {
+      "name": "llama2:latest",
+      "size": 3826793472,
+      "digest": "abc123...",
+      "modified_at": "2026-01-15T10:30:00Z"
+    },
+    {
+      "name": "* codellama:34b [QUEUED]",
+      "size": 0,
+      "digest": "",
+      "modified_at": "2026-01-18T14:00:00Z",
+      "details": {
+        "format": "queued",
+        "family": "queued"
+      }
+    }
+  ]
+}
+```
+
+**Notes:**
+- Queued models have `size: 0` and empty `digest`
+- The `* [QUEUED]` prefix makes them visually distinct
+- Deleting a queued model removes it from the queue (see DELETE /api/delete)
+
+---
+
+## Pass-Through Endpoints
+
+All other Ollama API endpoints pass through unchanged to the backend.
 
 ### POST /api/generate
 
@@ -245,7 +339,7 @@ curl http://localhost:11434/api/show -d '{"name": "llama2"}'
 
 ### DELETE /api/delete
 
-Delete a model. This endpoint is intercepted by ohhhllama to handle queued models.
+Delete a model. **Modified** - intercepted by ohhhllama to handle queued models.
 
 **Behavior:**
 - If the model is queued (pending in download queue): removes from queue, returns success
@@ -282,6 +376,8 @@ Standard Ollama response (passed through to backend).
 | 200 | Model deleted (queued or real) |
 | 400 | Invalid request (missing model name or invalid JSON) |
 | 404 | Model not found (from Ollama backend) |
+
+---
 
 ### POST /api/copy
 

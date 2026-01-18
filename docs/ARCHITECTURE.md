@@ -24,6 +24,10 @@ ohhhllama is a transparent proxy that sits between Ollama clients and the Ollama
 │  │  │  Request Router                                  │    │   │
 │  │  │  - POST /api/pull → Queue Handler               │    │   │
 │  │  │  - GET /api/queue → Queue Status                │    │   │
+│  │  │  - DELETE /api/queue → Remove from Queue        │    │   │
+│  │  │  - GET /api/tags → Modified (adds queued)       │    │   │
+│  │  │  - DELETE /api/delete → Intercept (queued)      │    │   │
+│  │  │  - GET /api/health → Health Check               │    │   │
 │  │  │  - Everything else → Pass-through               │    │   │
 │  │  └─────────────────────────────────────────────────┘    │   │
 │  │                         │                                │   │
@@ -46,7 +50,7 @@ ohhhllama is a transparent proxy that sits between Ollama clients and the Ollama
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │              Queue Processor (Systemd Timer)             │   │
-│  │              Runs at 3 AM                                │   │
+│  │              Runs at 10 PM (configurable)               │   │
 │  │  - Reads pending items from SQLite                      │   │
 │  │  - Downloads models via Ollama API                      │   │
 │  │  - Updates status in database                           │   │
@@ -108,7 +112,7 @@ CREATE TABLE rate_limits (
 
 A bash script that:
 
-- Runs via systemd timer at 3 AM (configurable via `/etc/systemd/system/ollama-queue.timer`)
+- Runs via systemd timer at 10 PM (configurable via `/etc/systemd/system/ollama-queue.timer`)
 - Queries pending items from SQLite
 - Downloads each model via Ollama API
 - Updates status on success/failure
@@ -155,7 +159,7 @@ Client → Proxy → [Check] → Queue → Client
    - Add to queue
    - Return "queued" response
 
-### Queue Processing (3 AM)
+### Queue Processing (10 PM default)
 
 ```
 Systemd Timer → Processor → SQLite → Ollama
@@ -169,6 +173,35 @@ Systemd Timer → Processor → SQLite → Ollama
    - Update status to "downloading"
    - Call Ollama pull API
    - Update status to "completed" or "failed"
+
+### Tags Request (GET /api/tags)
+
+```
+Client → Proxy → Ollama → Proxy → [Merge Queued] → Client
+                                        ↓
+                                    SQLite
+```
+
+1. Client requests model list
+2. Proxy forwards to Ollama, gets real models
+3. Proxy queries pending models from queue
+4. Proxy merges queued models with `* [QUEUED]` prefix
+5. Combined list returned to client
+
+### Delete Request (DELETE /api/delete)
+
+```
+Client → Proxy → [Check Queue] → Queue (if queued) → Client
+                      ↓
+               (if not queued)
+                      ↓
+                   Ollama → Client
+```
+
+1. Client requests model deletion
+2. Proxy checks if model is in queue (pending status)
+3. If queued: remove from queue, return success
+4. If not queued: pass through to Ollama backend
 
 ## Deduplication
 
