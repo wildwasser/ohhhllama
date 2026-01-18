@@ -697,13 +697,64 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
                 "message": f"Model {model} not in queue (or already processing)"
             })
     
+    def handle_model_delete(self, body: bytes) -> None:
+        """Handle DELETE /api/delete - delete queued or real model."""
+        try:
+            data = json.loads(body.decode())
+        except json.JSONDecodeError:
+            self.send_json_response(400, {"error": "Invalid JSON"})
+            return
+        
+        model = data.get("name") or data.get("model")
+        if not model:
+            self.send_json_response(400, {"error": "Model name required"})
+            return
+        
+        # Clean up the model name - remove our [QUEUED] suffix if present
+        # OpenWebUI might send "* modelname [QUEUED]" as the name
+        if model.startswith("* ") and "[QUEUED]" in model:
+            # Extract actual model name: "* llama2:7b [QUEUED]" -> "llama2:7b"
+            model = model.replace("* ", "").replace(" [QUEUED]", "").strip()
+        
+        # Check if this model is in our queue
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id FROM queue 
+            WHERE model = ? AND status = 'pending'
+        """, (model,))
+        queued = cursor.fetchone()
+        
+        if queued:
+            # It's a queued model - delete from queue
+            cursor.execute("""
+                DELETE FROM queue 
+                WHERE model = ? AND status = 'pending'
+            """, (model,))
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"Removed queued model {model} from queue")
+            # Return success in Ollama's expected format
+            self.send_json_response(200, {"status": "success"})
+        else:
+            conn.close()
+            # Not in queue - pass through to Ollama to delete real model
+            # Reconstruct body with cleaned model name in case it had [QUEUED] suffix
+            clean_body = json.dumps({"name": model}).encode()
+            self.proxy_request("DELETE", clean_body)
+    
     def do_DELETE(self) -> None:
         """Handle DELETE requests."""
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length) if content_length > 0 else b""
         
         if self.path == "/api/queue":
+            # Direct queue management
             self.handle_queue_delete(body)
+        elif self.path == "/api/delete":
+            # Intercept model delete - check if queued or real
+            self.handle_model_delete(body)
         else:
             self.proxy_request("DELETE", body)
     

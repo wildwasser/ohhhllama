@@ -245,11 +245,43 @@ curl http://localhost:11434/api/show -d '{"name": "llama2"}'
 
 ### DELETE /api/delete
 
-Delete a model.
+Delete a model. This endpoint is intercepted by ohhhllama to handle queued models.
 
+**Behavior:**
+- If the model is queued (pending in download queue): removes from queue, returns success
+- If the model is a real Ollama model: passes through to Ollama backend
+
+This allows OpenWebUI and the ollama CLI to delete queued models (shown as `* modelname [QUEUED]`) through the standard delete interface.
+
+**Request:**
 ```bash
 curl -X DELETE http://localhost:11434/api/delete -d '{"name": "llama2"}'
 ```
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Model name to delete |
+| `model` | string | No | Alternative to `name` |
+
+**Response (Queued Model Deleted):**
+```json
+{
+  "status": "success"
+}
+```
+
+**Response (Real Model):**
+Standard Ollama response (passed through to backend).
+
+**Status Codes:**
+
+| Code | Description |
+|------|-------------|
+| 200 | Model deleted (queued or real) |
+| 400 | Invalid request (missing model name or invalid JSON) |
+| 404 | Model not found (from Ollama backend) |
 
 ### POST /api/copy
 

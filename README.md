@@ -1,6 +1,6 @@
 # ohhhllama
 
-**Version 1.0.2** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
+**Version 1.0.3** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
 
 **Bandwidth-friendly Ollama with download queuing**
 
@@ -15,6 +15,7 @@ Stop your Ollama server from downloading 70GB models during peak hours. ohhhllam
 - **Rate Limiting** - Prevent abuse with per-IP daily limits
 - **SQLite Storage** - Simple, reliable, no external dependencies
 - **Full API Compatibility** - All other Ollama endpoints pass through unchanged
+- **OpenWebUI Compatible** - Queued models appear in model list and can be deleted
 
 ## Quick Start
 
@@ -206,6 +207,17 @@ sudo /opt/ohhhllama/scripts/process-queue.sh
 # View queue database directly
 sudo sqlite3 /var/lib/ohhhllama/queue.db "SELECT * FROM queue;"
 ```
+
+### OpenWebUI Integration
+
+ohhhllama is fully compatible with OpenWebUI. Queued models appear in the model list with a `* [QUEUED]` prefix, making them easy to identify.
+
+When you delete a queued model through OpenWebUI's model management interface (or via `ollama rm`), ohhhllama automatically:
+1. Detects that it's a queued model (not a real Ollama model)
+2. Removes it from the download queue
+3. Returns success to the client
+
+This means you can manage your download queue directly from OpenWebUI without needing to use the `/api/queue` endpoint.
 
 ## Service Management
 
