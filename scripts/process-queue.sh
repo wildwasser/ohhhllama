@@ -171,7 +171,7 @@ download_model() {
             fi
         fi
         
-        ((attempt++))
+        ((attempt++)) || true
     done
     
     log_error "Failed to download $model after $MAX_RETRIES attempts"
@@ -199,13 +199,13 @@ process_queue() {
     while IFS= read -r model; do
         [[ -z "$model" ]] && continue
         
-        ((current++))
+        ((current++)) || true
         log_info "Processing $current of $total: $model"
         
         if download_model "$model"; then
-            ((success++))
+            ((success++)) || true
         else
-            ((failed++))
+            ((failed++)) || true
         fi
         
         # Small delay between downloads
