@@ -90,6 +90,43 @@ check_python() {
     fi
 }
 
+# Install system dependencies
+install_dependencies() {
+    log_step "Checking system dependencies"
+    
+    local need_update=false
+    local packages_to_install=()
+    
+    # Check for curl
+    if command -v curl &> /dev/null; then
+        log_success "curl found"
+    else
+        log_info "curl not found, will install"
+        packages_to_install+=("curl")
+        need_update=true
+    fi
+    
+    # Check for sqlite3
+    if command -v sqlite3 &> /dev/null; then
+        log_success "sqlite3 found"
+    else
+        log_info "sqlite3 not found, will install"
+        packages_to_install+=("sqlite3")
+        need_update=true
+    fi
+    
+    # Install missing packages
+    if [[ ${#packages_to_install[@]} -gt 0 ]]; then
+        if $need_update; then
+            log_info "Updating package lists..."
+            apt-get update -qq
+        fi
+        log_info "Installing: ${packages_to_install[*]}"
+        apt-get install -y "${packages_to_install[@]}"
+        log_success "Dependencies installed"
+    fi
+}
+
 # Install Docker
 install_docker() {
     log_step "Checking Docker installation"
@@ -332,6 +369,7 @@ main() {
     check_root
     check_os
     check_python
+    install_dependencies
     install_docker
     install_ollama
     install_proxy
