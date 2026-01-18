@@ -1,0 +1,14 @@
+[Unit]
+Description=ohhhllama Queue Processor Timer
+Documentation=https://github.com/wildwasser/ohhhllama
+
+[Timer]
+# Run at 3 AM every day
+OnCalendar=*-*-* 03:00:00
+# Add some randomness to avoid thundering herd
+RandomizedDelaySec=300
+# Catch up if system was off at scheduled time
+Persistent=true
+
+[Install]
+WantedBy=timers.target

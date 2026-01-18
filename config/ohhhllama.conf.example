@@ -1,0 +1,24 @@
+# ohhhllama Configuration
+# Copy this file to /opt/ohhhllama/ohhhllama.conf and customize as needed
+# After changes, restart the service: sudo systemctl restart ollama-proxy
+
+# Ollama backend URL
+# The actual Ollama instance running in Docker on port 11435
+OLLAMA_BACKEND=http://127.0.0.1:11435
+
+# Proxy listen port
+# This is the port clients connect to (standard Ollama port)
+LISTEN_PORT=11434
+
+# SQLite database path
+# Stores the download queue and rate limit data
+DB_PATH=/var/lib/ohhhllama/queue.db
+
+# Max model requests per IP per day
+# Set to 0 to disable rate limiting
+RATE_LIMIT=5
+
+# Queue processing schedule (cron format)
+# Default: 3 AM daily
+# This is used by the cron job, not the systemd timer
+QUEUE_SCHEDULE="0 3 * * *"

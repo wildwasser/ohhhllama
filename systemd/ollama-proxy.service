@@ -1,0 +1,40 @@
+[Unit]
+Description=ohhhllama - Ollama Proxy with Download Queue
+Documentation=https://github.com/wildwasser/ohhhllama
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/ohhhllama/proxy.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/ohhhllama/ohhhllama.conf
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/ohhhllama
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ollama-proxy
+
+[Install]
+WantedBy=multi-user.target

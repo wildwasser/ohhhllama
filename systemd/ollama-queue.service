@@ -1,0 +1,27 @@
+[Unit]
+Description=ohhhllama Queue Processor
+Documentation=https://github.com/wildwasser/ohhhllama
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ohhhllama/scripts/process-queue.sh
+
+# Environment
+EnvironmentFile=-/opt/ohhhllama/ohhhllama.conf
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/ohhhllama
+PrivateTmp=yes
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ollama-queue
+
+[Install]
+WantedBy=multi-user.target
