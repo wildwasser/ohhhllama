@@ -50,7 +50,7 @@ sudo ./install.sh
                     │   Queue     │
                     └─────────────┘
                            │
-                           ▼ (3 AM cron)
+                           ▼ (3 AM systemd timer)
                     ┌─────────────┐
                     │  Download   │
                     │  Processor  │
@@ -59,7 +59,7 @@ sudo ./install.sh
 
 1. Client requests `POST /api/pull` for a model
 2. Proxy intercepts, adds to SQLite queue, returns "queued" response
-3. At 3 AM, cron job processes queue and downloads models
+3. At 3 AM, systemd timer triggers queue processing and downloads models
 4. All other API calls pass through unchanged to Ollama
 
 ## Configuration
@@ -79,7 +79,8 @@ sudo nano /opt/ohhhllama/ohhhllama.conf
 | `LISTEN_PORT` | `11434` | Proxy listen port |
 | `DB_PATH` | `/var/lib/ohhhllama/queue.db` | SQLite database path |
 | `RATE_LIMIT` | `5` | Max model requests per IP per day |
-| `QUEUE_SCHEDULE` | `0 3 * * *` | Cron schedule for queue processing |
+
+> **Note:** Queue processing schedule is controlled by the systemd timer. See [Systemd Timer](#systemd-timer) section below.
 
 After changing config, restart the service:
 
@@ -147,6 +148,58 @@ docker ps | grep ollama
 docker logs ollama
 ```
 
+## Systemd Timer
+
+Queue processing is handled by a systemd timer that runs at 3 AM daily by default.
+
+### Check Timer Status
+
+```bash
+# View timer status and next run time
+sudo systemctl list-timers ollama-queue.timer
+
+# Check if timer is enabled
+sudo systemctl status ollama-queue.timer
+```
+
+### Change Schedule
+
+Edit the timer file to change when queue processing runs:
+
+```bash
+sudo nano /etc/systemd/system/ollama-queue.timer
+```
+
+Modify the `OnCalendar` line. Examples:
+- `OnCalendar=*-*-* 03:00:00` - 3 AM daily (default)
+- `OnCalendar=*-*-* 02:00:00` - 2 AM daily
+- `OnCalendar=Sat *-*-* 04:00:00` - 4 AM on Saturdays only
+- `OnCalendar=*-*-* 01,13:00:00` - 1 AM and 1 PM daily
+
+After editing, reload and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama-queue.timer
+```
+
+### Run Queue Manually
+
+```bash
+# Process queue immediately (don't wait for timer)
+sudo systemctl start ollama-queue.service
+```
+
+### View Queue Logs
+
+```bash
+# View recent queue processing logs
+sudo journalctl -u ollama-queue.service -n 50
+
+# Follow logs in real-time
+sudo journalctl -u ollama-queue.service -f
+```
+
 ## Troubleshooting
 
 ### Proxy won't start
@@ -165,11 +218,14 @@ curl http://127.0.0.1:11435/api/tags
 ### Models not downloading
 
 ```bash
-# Check cron job
-sudo crontab -l | grep ohhhllama
+# Check timer status
+sudo systemctl list-timers ollama-queue.timer
 
 # Run queue processor manually
-sudo /opt/ohhhllama/scripts/process-queue.sh
+sudo systemctl start ollama-queue.service
+
+# Check queue processor logs
+sudo journalctl -u ollama-queue.service -n 50
 
 # Check queue status
 sqlite3 /var/lib/ohhhllama/queue.db "SELECT * FROM queue WHERE status='pending';"

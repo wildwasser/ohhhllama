@@ -81,6 +81,15 @@ print_header() {
 stop_services() {
     log_step "Stopping services"
     
+    # Stop and disable queue timer
+    if systemctl is-active --quiet ollama-queue.timer 2>/dev/null; then
+        log_info "Stopping ollama-queue timer..."
+        systemctl disable --now ollama-queue.timer
+        log_success "Stopped and disabled ollama-queue timer"
+    else
+        log_info "ollama-queue timer not running"
+    fi
+    
     # Stop proxy service
     if systemctl is-active --quiet ollama-proxy 2>/dev/null; then
         log_info "Stopping ollama-proxy service..."
@@ -121,17 +130,7 @@ remove_systemd() {
     log_success "Reloaded systemd"
 }
 
-# Remove cron job
-remove_cron() {
-    log_step "Removing cron job"
-    
-    if crontab -l 2>/dev/null | grep -q "process-queue.sh"; then
-        crontab -l 2>/dev/null | grep -v "process-queue.sh" | crontab -
-        log_success "Removed cron job"
-    else
-        log_info "No cron job found"
-    fi
-}
+
 
 # Remove install directory
 remove_install_dir() {
@@ -264,7 +263,6 @@ main() {
     
     stop_services
     remove_systemd
-    remove_cron
     remove_install_dir
     handle_data_dir
     handle_docker

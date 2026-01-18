@@ -110,6 +110,19 @@ fi
 
 log_success "Installed systemd service"
 
+# Install timer and service for queue processing
+log_info "Installing systemd timer..."
+
+if [[ -f "$SCRIPT_DIR/systemd/ollama-queue.timer" ]]; then
+    cp "$SCRIPT_DIR/systemd/ollama-queue.timer" /etc/systemd/system/
+    log_success "Installed ollama-queue.timer"
+fi
+
+if [[ -f "$SCRIPT_DIR/systemd/ollama-queue.service" ]]; then
+    cp "$SCRIPT_DIR/systemd/ollama-queue.service" /etc/systemd/system/
+    log_success "Installed ollama-queue.service"
+fi
+
 # Reload systemd
 systemctl daemon-reload
 
@@ -117,6 +130,10 @@ systemctl daemon-reload
 log_info "Enabling and starting service..."
 systemctl enable ollama-proxy
 systemctl start ollama-proxy
+
+# Enable and start timer
+log_info "Enabling queue timer..."
+systemctl enable --now ollama-queue.timer
 
 # Wait and verify
 sleep 2
@@ -145,6 +162,11 @@ echo "Service management:"
 echo "  sudo systemctl status ollama-proxy"
 echo "  sudo systemctl restart ollama-proxy"
 echo "  sudo journalctl -u ollama-proxy -f"
+echo ""
+echo "Queue timer:"
+echo "  sudo systemctl list-timers ollama-queue.timer"
+echo "  sudo systemctl start ollama-queue.service  # Run queue now"
+echo "  sudo journalctl -u ollama-queue.service"
 echo ""
 echo "Configuration: $INSTALL_DIR/ohhhllama.conf"
 echo "Queue database: $DATA_DIR/queue.db"

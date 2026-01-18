@@ -45,7 +45,7 @@ ohhhllama is a transparent proxy that sits between Ollama clients and the Ollama
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Queue Processor (Cron/Timer)                │   │
+│  │              Queue Processor (Systemd Timer)             │   │
 │  │              Runs at 3 AM                                │   │
 │  │  - Reads pending items from SQLite                      │   │
 │  │  - Downloads models via Ollama API                      │   │
@@ -108,7 +108,7 @@ CREATE TABLE rate_limits (
 
 A bash script that:
 
-- Runs via cron at 3 AM (configurable)
+- Runs via systemd timer at 3 AM (configurable via `/etc/systemd/system/ollama-queue.timer`)
 - Queries pending items from SQLite
 - Downloads each model via Ollama API
 - Updates status on success/failure
@@ -158,12 +158,12 @@ Client → Proxy → [Check] → Queue → Client
 ### Queue Processing (3 AM)
 
 ```
-Cron → Processor → SQLite → Ollama
-                      ↓
-                  (update status)
+Systemd Timer → Processor → SQLite → Ollama
+                               ↓
+                           (update status)
 ```
 
-1. Cron triggers processor script
+1. Systemd timer triggers processor script
 2. Script queries pending items
 3. For each item:
    - Update status to "downloading"

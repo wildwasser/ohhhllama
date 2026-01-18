@@ -232,22 +232,21 @@ install_service() {
     fi
 }
 
-# Install cron job
-install_cron() {
-    log_step "Installing cron job for queue processing"
+# Install systemd timer for queue processing
+install_timer() {
+    log_step "Installing systemd timer for queue processing"
     
-    CRON_CMD="0 3 * * * /opt/ohhhllama/scripts/process-queue.sh >> /var/log/ohhhllama-queue.log 2>&1"
+    # Copy timer and service files
+    cp "$SCRIPT_DIR/systemd/ollama-queue.timer" /etc/systemd/system/
+    cp "$SCRIPT_DIR/systemd/ollama-queue.service" /etc/systemd/system/
     
-    # Check if cron job already exists
-    if crontab -l 2>/dev/null | grep -q "process-queue.sh"; then
-        log_info "Cron job already exists, updating..."
-        crontab -l 2>/dev/null | grep -v "process-queue.sh" | crontab -
-    fi
+    # Reload systemd
+    systemctl daemon-reload
     
-    # Add cron job
-    (crontab -l 2>/dev/null; echo "$CRON_CMD") | crontab -
+    # Enable and start timer
+    systemctl enable --now ollama-queue.timer
     
-    log_success "Cron job installed (runs at 3 AM daily)"
+    log_success "Systemd timer installed (runs at 3 AM daily)"
 }
 
 # Verify installation
@@ -280,11 +279,11 @@ verify_installation() {
         ((errors++))
     fi
     
-    # Check cron
-    if crontab -l 2>/dev/null | grep -q "process-queue.sh"; then
-        log_success "Cron job installed"
+    # Check timer
+    if systemctl is-enabled --quiet ollama-queue.timer 2>/dev/null; then
+        log_success "Queue timer enabled"
     else
-        log_warn "Cron job not found"
+        log_warn "Queue timer not enabled"
     fi
     
     return $errors
@@ -309,11 +308,15 @@ print_success() {
     echo "  curl http://localhost:11434/api/queue"
     echo ""
     echo -e "  ${CYAN}# Process queue now (instead of waiting for 3 AM)${NC}"
-    echo "  sudo /opt/ohhhllama/scripts/process-queue.sh"
+    echo "  sudo systemctl start ollama-queue.service"
     echo ""
     echo "Service management:"
     echo "  sudo systemctl status ollama-proxy"
     echo "  sudo journalctl -u ollama-proxy -f"
+    echo ""
+    echo "Queue timer:"
+    echo "  sudo systemctl list-timers ollama-queue.timer"
+    echo "  sudo journalctl -u ollama-queue.service"
     echo ""
     echo "Configuration: /opt/ohhhllama/ohhhllama.conf"
     echo "Queue database: /var/lib/ohhhllama/queue.db"
@@ -333,7 +336,7 @@ main() {
     install_ollama
     install_proxy
     install_service
-    install_cron
+    install_timer
     
     if verify_installation; then
         print_success

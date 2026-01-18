@@ -18,7 +18,9 @@ DB_PATH=/var/lib/ohhhllama/queue.db
 # Set to 0 to disable rate limiting
 RATE_LIMIT=5
 
-# Queue processing schedule (cron format)
-# Default: 3 AM daily
-# This is used by the cron job, not the systemd timer
-QUEUE_SCHEDULE="0 3 * * *"
+# Queue processing schedule
+# The schedule is controlled by the systemd timer, not this config file.
+# To change when queue processing runs, edit the timer:
+#   sudo nano /etc/systemd/system/ollama-queue.timer
+# Then reload: sudo systemctl daemon-reload && sudo systemctl restart ollama-queue.timer
+# Default: 3 AM daily (OnCalendar=*-*-* 03:00:00)

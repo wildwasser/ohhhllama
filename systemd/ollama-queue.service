@@ -1,7 +1,7 @@
 [Unit]
 Description=ohhhllama Queue Processor
 Documentation=https://github.com/wildwasser/ohhhllama
-After=network.target docker.service
+After=network.target docker.service ollama-proxy.service
 Wants=docker.service
 
 [Service]
