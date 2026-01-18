@@ -115,13 +115,13 @@ get_pending_models() {
 # Update model status
 update_status() {
     local model="$1"
-    local status="$2"
+    local new_status="$2"
     local error_msg="${3:-}"
     
     if [[ -n "$error_msg" ]]; then
-        sqlite3 "$DB_PATH" "UPDATE queue SET status = '$status', error = '$error_msg', updated_at = datetime('now') WHERE model = '$model' AND status = 'pending';"
+        sqlite3 "$DB_PATH" "UPDATE queue SET status = '$new_status', error = '$error_msg', updated_at = datetime('now') WHERE model = '$model' AND status IN ('pending', 'downloading');"
     else
-        sqlite3 "$DB_PATH" "UPDATE queue SET status = '$status', updated_at = datetime('now') WHERE model = '$model' AND status = 'pending';"
+        sqlite3 "$DB_PATH" "UPDATE queue SET status = '$new_status', updated_at = datetime('now') WHERE model = '$model' AND status IN ('pending', 'downloading');"
     fi
 }
 
