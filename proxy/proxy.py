@@ -659,9 +659,53 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
         else:
             self.proxy_request("POST", body)
     
+    def handle_queue_delete(self, body: bytes) -> None:
+        """Handle DELETE /api/queue - remove a model from the queue."""
+        try:
+            data = json.loads(body.decode())
+        except json.JSONDecodeError:
+            self.send_json_response(400, {"error": "Invalid JSON"})
+            return
+        
+        model = data.get("name") or data.get("model")
+        if not model:
+            self.send_json_response(400, {"error": "Model name required"})
+            return
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Only delete pending models (not downloading/completed/failed)
+        cursor.execute("""
+            DELETE FROM queue 
+            WHERE model = ? AND status = 'pending'
+        """, (model,))
+        
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        if deleted > 0:
+            logger.info(f"Removed {model} from queue")
+            self.send_json_response(200, {
+                "status": "deleted",
+                "message": f"Model {model} removed from queue"
+            })
+        else:
+            self.send_json_response(404, {
+                "status": "not_found",
+                "message": f"Model {model} not in queue (or already processing)"
+            })
+    
     def do_DELETE(self) -> None:
         """Handle DELETE requests."""
-        self.proxy_request("DELETE")
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length > 0 else b""
+        
+        if self.path == "/api/queue":
+            self.handle_queue_delete(body)
+        else:
+            self.proxy_request("DELETE", body)
     
     def do_PUT(self) -> None:
         """Handle PUT requests."""

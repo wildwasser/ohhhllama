@@ -81,6 +81,48 @@ curl http://localhost:11434/api/queue
 
 ---
 
+### DELETE /api/queue
+
+Remove a model from the download queue. Only pending models can be removed (not models currently downloading).
+
+**Request:**
+```bash
+curl -X DELETE http://localhost:11434/api/queue -d '{"name": "llama2:70b"}'
+```
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Model name to remove |
+| `model` | string | No | Alternative to `name` |
+
+**Response (Success):**
+```json
+{
+  "status": "deleted",
+  "message": "Model llama2:70b removed from queue"
+}
+```
+
+**Response (Not Found):**
+```json
+{
+  "status": "not_found",
+  "message": "Model llama2:70b not in queue (or already processing)"
+}
+```
+
+**Status Codes:**
+
+| Code | Description |
+|------|-------------|
+| 200 | Model removed successfully |
+| 400 | Invalid request (missing model name or invalid JSON) |
+| 404 | Model not found in queue (or already processing) |
+
+---
+
 ## Modified Endpoints
 
 These Ollama endpoints have modified behavior in ohhhllama.

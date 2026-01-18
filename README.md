@@ -1,6 +1,6 @@
 # ohhhllama
 
-**Version 1.0.1** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
+**Version 1.0.2** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
 
 **Bandwidth-friendly Ollama with download queuing**
 
@@ -196,6 +196,9 @@ Health status values:
 ```bash
 # View queue
 curl http://localhost:11434/api/queue
+
+# Remove a model from queue
+curl -X DELETE http://localhost:11434/api/queue -d '{"name": "llama2:70b"}'
 
 # Process queue manually (as root)
 sudo /opt/ohhhllama/scripts/process-queue.sh
