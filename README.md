@@ -1,5 +1,7 @@
 # ohhhllama
 
+**Version 1.0.0** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
+
 **Bandwidth-friendly Ollama with download queuing**
 
 Stop your Ollama server from downloading 70GB models during peak hours. ohhhllama is a transparent proxy that intercepts model pull requests and queues them for off-peak processing.
@@ -31,11 +33,40 @@ sudo ./install.sh
 
 ## Requirements
 
-- Ubuntu 20.04+ (or Debian-based Linux)
-- Docker (installed automatically if missing)
-- Python 3.8+
-- Root/sudo access for installation
-- External storage partition mounted at `/data` (recommended for model storage)
+- **Operating System**: Ubuntu 20.04+ or Debian-based Linux
+- **Python 3.8+**: Uses only standard library (no pip packages required)
+- **Docker**: Installed automatically if missing
+- **sqlite3**: CLI tool for queue processing (installed automatically)
+- **curl**: For API calls (installed automatically)
+- **Root/sudo access**: Required for installation
+- **External storage**: Partition mounted at `/data` (recommended, ~500GB+ for models)
+
+### What Gets Installed
+
+The installer will automatically install these if missing:
+- Docker CE (if not present)
+- sqlite3 CLI tool
+- curl
+
+No Python virtual environment or pip packages are needed - the proxy uses only Python standard library modules.
+
+## Pre-Installation Checklist
+
+Before running the installer, verify:
+
+```bash
+# Check Python version (need 3.8+)
+python3 --version
+
+# Check if Docker is installed (optional - installer will add it)
+docker --version
+
+# Check if /data partition is mounted (recommended)
+df -h /data
+
+# Check available space
+df -h
+```
 
 ## How It Works
 
