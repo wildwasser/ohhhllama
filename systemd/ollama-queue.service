@@ -15,7 +15,7 @@ EnvironmentFile=-/opt/ohhhllama/ohhhllama.conf
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/var/lib/ohhhllama
+ReadWritePaths=/var/lib/ohhhllama /data/huggingface /data/ollama
 PrivateTmp=yes
 
 # Logging

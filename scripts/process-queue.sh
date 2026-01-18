@@ -17,6 +17,10 @@ LOG_PREFIX="[ohhhllama-queue]"
 MAX_RETRIES=3
 RETRY_DELAY=60
 
+# HuggingFace configuration
+HF_BACKEND_SCRIPT="${HF_BACKEND_SCRIPT:-/opt/ohhhllama/huggingface/hf_backend.py}"
+HF_VENV="${HF_VENV:-/opt/ohhhllama/huggingface/.venv}"
+
 # Colors (only if terminal)
 if [[ -t 1 ]]; then
     RED='\033[0;31m'
@@ -107,9 +111,9 @@ check_disk_space() {
     return 0
 }
 
-# Get pending models from queue
+# Get pending models from queue (returns: model|type)
 get_pending_models() {
-    sqlite3 "$DB_PATH" "SELECT DISTINCT model FROM queue WHERE status = 'pending' ORDER BY created_at ASC;"
+    sqlite3 "$DB_PATH" "SELECT model || '|' || COALESCE(type, 'ollama') FROM queue WHERE status = 'pending' ORDER BY created_at ASC;"
 }
 
 # Update model status
@@ -179,6 +183,88 @@ download_model() {
     return 1
 }
 
+# Download a HuggingFace model
+download_hf_model() {
+    local model_data="$1"
+    local attempt=1
+    
+    # Parse model data - could be plain repo_id or JSON with extra params
+    local repo_id
+    local quant="Q4_K_M"
+    local custom_name=""
+    
+    if [[ "$model_data" == "{"* ]]; then
+        # JSON format - extract fields
+        repo_id=$(echo "$model_data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('repo_id',''))")
+        quant=$(echo "$model_data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('quant','Q4_K_M'))")
+        custom_name=$(echo "$model_data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('name',''))")
+    else
+        repo_id="$model_data"
+    fi
+    
+    if [[ -z "$repo_id" ]]; then
+        log_error "Invalid HuggingFace model data: $model_data"
+        update_status "$model_data" "failed" "Invalid model data"
+        return 1
+    fi
+    
+    # Check disk space before downloading
+    if ! check_disk_space; then
+        log_error "Skipping $repo_id due to insufficient disk space"
+        update_status "$model_data" "failed" "Insufficient disk space"
+        return 1
+    fi
+    
+    log_info "Downloading HuggingFace model: $repo_id (quant: $quant)"
+    update_status "$model_data" "downloading"
+    
+    # Check if venv exists
+    if [[ ! -d "$HF_VENV" ]]; then
+        log_error "HuggingFace venv not found at $HF_VENV"
+        update_status "$model_data" "failed" "HuggingFace environment not set up"
+        return 1
+    fi
+    
+    # Build the command
+    local cmd="$HF_VENV/bin/python3 $HF_BACKEND_SCRIPT"
+    
+    while [[ $attempt -le $MAX_RETRIES ]]; do
+        log_info "Attempt $attempt of $MAX_RETRIES for $repo_id"
+        
+        # Run the HuggingFace backend script
+        # Use 'yes' to auto-confirm the prompt
+        local output
+        local exit_code
+        
+        if [[ -n "$custom_name" ]]; then
+            output=$(echo "y" | $cmd "$repo_id" "$custom_name" "$quant" 2>&1) || exit_code=$?
+        else
+            output=$(echo "y" | $cmd "$repo_id" "" "$quant" 2>&1) || exit_code=$?
+        fi
+        exit_code=${exit_code:-0}
+        
+        if [[ $exit_code -eq 0 ]] && echo "$output" | grep -q "Success\|success\|completed"; then
+            log_success "Successfully downloaded HuggingFace model: $repo_id"
+            update_status "$model_data" "completed"
+            return 0
+        else
+            log_warn "HuggingFace download failed (exit code $exit_code)"
+            log_warn "Output: $output"
+            
+            if [[ $attempt -lt $MAX_RETRIES ]]; then
+                log_info "Retrying in $RETRY_DELAY seconds..."
+                sleep $RETRY_DELAY
+            fi
+        fi
+        
+        ((attempt++)) || true
+    done
+    
+    log_error "Failed to download HuggingFace model $repo_id after $MAX_RETRIES attempts"
+    update_status "$model_data" "failed" "Download failed after $MAX_RETRIES attempts"
+    return 1
+}
+
 # Process the queue
 process_queue() {
     local models
@@ -196,16 +282,29 @@ process_queue() {
     
     log_info "Found $total model(s) to download"
     
-    while IFS= read -r model; do
-        [[ -z "$model" ]] && continue
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        
+        # Parse model|type format
+        local model="${line%|*}"
+        local type="${line##*|}"
         
         ((current++)) || true
-        log_info "Processing $current of $total: $model"
+        log_info "Processing $current of $total: $model (type: $type)"
         
-        if download_model "$model"; then
-            ((success++)) || true
+        if [[ "$type" == "huggingface" ]]; then
+            if download_hf_model "$model"; then
+                ((success++)) || true
+            else
+                ((failed++)) || true
+            fi
         else
-            ((failed++)) || true
+            # Default to Ollama
+            if download_model "$model"; then
+                ((success++)) || true
+            else
+                ((failed++)) || true
+            fi
         fi
         
         # Small delay between downloads
@@ -232,7 +331,11 @@ show_status() {
     local completed=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM queue WHERE status = 'completed';")
     local failed=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM queue WHERE status = 'failed';")
     
-    echo "  Pending:     $pending"
+    # Type breakdown
+    local ollama_pending=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM queue WHERE status = 'pending' AND (type = 'ollama' OR type IS NULL);")
+    local hf_pending=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM queue WHERE status = 'pending' AND type = 'huggingface';")
+    
+    echo "  Pending:     $pending (Ollama: $ollama_pending, HuggingFace: $hf_pending)"
     echo "  Downloading: $downloading"
     echo "  Completed:   $completed"
     echo "  Failed:      $failed"
@@ -240,7 +343,7 @@ show_status() {
     
     if [[ "$pending" -gt 0 ]]; then
         echo "Pending models:"
-        sqlite3 "$DB_PATH" "SELECT '  - ' || model || ' (requested by ' || requester_ip || ' at ' || created_at || ')' FROM queue WHERE status = 'pending' ORDER BY created_at ASC LIMIT 10;"
+        sqlite3 "$DB_PATH" "SELECT '  - [' || COALESCE(type, 'ollama') || '] ' || model || ' (' || created_at || ')' FROM queue WHERE status = 'pending' ORDER BY created_at ASC LIMIT 10;"
         
         if [[ "$pending" -gt 10 ]]; then
             echo "  ... and $((pending - 10)) more"

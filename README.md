@@ -1,35 +1,22 @@
 # ohhhllama
 
-**Version 1.0.5** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
+**Bandwidth-friendly Ollama proxy with HuggingFace integration and download queuing.**
 
-**Bandwidth-friendly Ollama with download queuing**
-
-Stop your Ollama server from downloading 70GB models during peak hours. ohhhllama is a transparent proxy that intercepts model pull requests and queues them for off-peak processing.
+Queue model downloads for off-peak hours. Supports both Ollama library models and HuggingFace GGUF models with automatic conversion.
 
 ## Features
 
-- 🚀 **Transparent Proxy** - Drop-in replacement for Ollama API on port 11434
-- 📥 **Download Queue** - Model pulls are queued, not executed immediately  
-- 🌙 **Off-Peak Processing** - Queue processes at 10 PM (configurable via systemd timer)
-- 🔄 **Request Deduplication** - Same model requested 10 times? Downloaded once
-- 🛡️ **Rate Limiting** - Prevent abuse with per-IP daily limits (default: 5/day)
-- 💾 **External Storage** - Models stored on /data partition, not root filesystem
-- 📊 **Disk Monitoring** - Rejects new requests when disk is >90% full
-- 🏥 **Health Endpoint** - `/api/health` for monitoring integration
-- 👀 **Queue Visibility** - Queued models appear in `ollama list` with `[QUEUED]` tag
-- 🗑️ **Queue Management** - Delete queued models via API or OpenWebUI
-- 🖥️ **Status Command** - Run `ohhhllama` for instant status and command reference
-- 🔌 **OpenWebUI Compatible** - Full integration with OpenWebUI model management
-- 📦 **Zero Dependencies** - Python stdlib only, no pip packages needed
+- :clock1: **Scheduled Downloads** - Queue models for off-peak download (default: 10 PM)
+- :hugs: **HuggingFace Integration** - Download GGUF models directly from HuggingFace
+- :arrows_counterclockwise: **Auto-Conversion** - Automatically converts HuggingFace models to Ollama format
+- :bar_chart: **Interactive CLI** - User-friendly menu for managing models
+- :lock: **Rate Limiting** - Prevent abuse with per-IP daily limits
+- :floppy_disk: **Disk Monitoring** - Automatic disk space checks before downloads
+- :electric_plug: **Transparent Proxy** - Drop-in replacement for Ollama API
 
 ## Quick Start
 
-```bash
-# One-liner install (requires sudo)
-curl -fsSL https://raw.githubusercontent.com/wildwasser/ohhhllama/main/install.sh | sudo bash
-```
-
-Or clone and install:
+### Installation
 
 ```bash
 git clone https://github.com/wildwasser/ohhhllama.git
@@ -37,409 +24,253 @@ cd ohhhllama
 sudo ./install.sh
 ```
 
-## Status Command
+The installer will:
+- Install Docker (if not present)
+- Set up Ollama in a Docker container
+- Install the ohhhllama proxy service
+- Set up the download queue timer
+- Install the HuggingFace integration module
 
-After installation, run `ohhhllama` from anywhere to see status and commands:
+### Usage
 
-```bash
-$ ohhhllama
-╔══════════════════════════════════════════════════════════════╗
-║                    ohhhllama - Quick Reference                ║
-╚══════════════════════════════════════════════════════════════╝
-
-=== Service Status ===
-Proxy:     active
-Timer:     active
-Ollama:    Up 2 hours
-
-=== Queue Status ===
-  Next download: Sun 2026-01-19 22:00 UTC (10h left)
-  Pending: 2, Downloading: 0, Completed: 5, Failed: 0
-
-  Queued models:
-    • llama2:70b
-    • codellama:34b
-
-=== Disk Status ===
-  Path: /data/ollama
-  Used: 12% | Free: 396.5 GB
-
-=== Common Commands ===
-  Queue a model:        curl http://localhost:11434/api/pull -d '{"name": "llama2"}'
-  View queue:           curl http://localhost:11434/api/queue
-  View models:          curl http://localhost:11434/api/tags
-  Health check:         curl http://localhost:11434/api/health
-  Remove from queue:    curl -X DELETE http://localhost:11434/api/queue -d '{"name": "model"}'
-  Process queue now:    sudo systemctl start ollama-queue.service
-
-=== Service Commands ===
-  Restart proxy:        sudo systemctl restart ollama-proxy
-  View proxy logs:      journalctl -u ollama-proxy -f
-  View queue logs:      journalctl -u ollama-queue.service -n 50
-  Check timer:          systemctl list-timers ollama-queue.timer
-
-=== Configuration ===
-  Config file:          /opt/ohhhllama/ohhhllama.conf
-  Timer schedule:       /etc/systemd/system/ollama-queue.timer
-  Queue database:       /var/lib/ohhhllama/queue.db
-  Model storage:        /data/ollama
-```
-
-## Requirements
-
-- **Operating System**: Ubuntu 20.04+ or Debian-based Linux
-- **Python 3.8+**: Uses only standard library (no pip packages required)
-- **Docker**: Installed automatically if missing
-- **sqlite3**: CLI tool for queue processing (installed automatically)
-- **curl**: For API calls (installed automatically)
-- **Root/sudo access**: Required for installation
-- **External storage**: Partition mounted at `/data` (recommended, ~500GB+ for models)
-
-### What Gets Installed
-
-The installer will automatically install these if missing:
-- Docker CE (if not present)
-- sqlite3 CLI tool
-- curl
-
-No Python virtual environment or pip packages are needed - the proxy uses only Python standard library modules.
-
-## Pre-Installation Checklist
-
-Before running the installer, verify:
+#### Interactive Menu
 
 ```bash
-# Check Python version (need 3.8+)
-python3 --version
-
-# Check if Docker is installed (optional - installer will add it)
-docker --version
-
-# Check if /data partition is mounted (recommended)
-df -h /data
-
-# Check available space
-df -h
+ohhhllama
 ```
 
-## How It Works
+This opens an interactive menu where you can:
+- View system status
+- Queue Ollama models
+- Queue HuggingFace models
+- View/manage the download queue
+- List and remove installed models
+- View logs
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │────▶│  ohhhllama  │────▶│   Ollama    │
-│ (port 11434)│     │   (proxy)   │     │ (port 11435)│
-└─────────────┘     └─────────────┘     └─────────────┘
-                           │
-                           ▼
-                    ┌─────────────┐
-                    │   SQLite    │
-                    │   Queue     │
-                    └─────────────┘
-                           │
-                           ▼ (3 AM systemd timer)
-                    ┌─────────────┐
-                    │  Download   │
-                    │  Processor  │
-                    └─────────────┘
+#### Quick Status
+
+```bash
+ohhhllama --status
 ```
 
-1. Client requests `POST /api/pull` for a model
-2. Proxy intercepts, adds to SQLite queue, returns "queued" response
-3. At 10 PM, systemd timer triggers queue processing and downloads models
-4. All other API calls pass through unchanged to Ollama
+#### Queue Models via API
+
+**Ollama models:**
+```bash
+curl http://localhost:11434/api/pull -d '{"name": "llama3:8b"}'
+```
+
+**HuggingFace models:**
+```bash
+curl http://localhost:11434/api/hf/queue -d '{"repo_id": "TheBloke/Mistral-7B-v0.1-GGUF"}'
+```
+
+## Architecture
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Client/App    │────▶│ ohhhllama Proxy │────▶│ Ollama (Docker) │
+│  (port 11434)   │     │   (port 11434)  │     │   (port 11435)  │
+└─────────────────┘     └────────┬────────┘     └─────────────────┘
+                                 │
+                                 ▼
+                        ┌─────────────────┐
+                        │  SQLite Queue   │
+                        │   Database      │
+                        └────────┬────────┘
+                                 │
+                                 ▼ (scheduled)
+                        ┌─────────────────┐
+                        │ Queue Processor │
+                        │  (systemd timer)│
+                        └─────────────────┘
+```
 
 ## Configuration
 
-Configuration is done via environment variables. Copy the example config:
+Configuration file: `/opt/ohhhllama/ohhhllama.conf`
 
 ```bash
-sudo cp /opt/ohhhllama/ohhhllama.conf.example /opt/ohhhllama/ohhhllama.conf
-sudo nano /opt/ohhhllama/ohhhllama.conf
+# Ollama backend URL (internal)
+OLLAMA_BACKEND=http://127.0.0.1:11435
+
+# Proxy listen port
+LISTEN_PORT=11434
+
+# Queue database path
+DB_PATH=/var/lib/ohhhllama/queue.db
+
+# Rate limit (requests per IP per day)
+RATE_LIMIT=5
+
+# Disk monitoring
+DISK_PATH=/data/ollama
+DISK_THRESHOLD=90
+
+# HuggingFace settings
+HF_CACHE_DIR=/data/huggingface
 ```
 
-### Options
+## API Reference
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OLLAMA_BACKEND` | `http://127.0.0.1:11435` | Ollama backend URL |
-| `LISTEN_PORT` | `11434` | Proxy listen port |
-| `DB_PATH` | `/var/lib/ohhhllama/queue.db` | SQLite database path |
-| `RATE_LIMIT` | `5` | Max model requests per IP per day |
-| `DISK_PATH` | `/data/ollama` | Path to monitor for disk space |
-| `DISK_THRESHOLD` | `90` | Disk usage threshold (percent) |
-| `CLEANUP_DAYS` | `30` | Auto-cleanup old entries after N days |
+### Standard Ollama Endpoints
 
-> **Note:** Queue processing schedule is controlled by the systemd timer. See [Systemd Timer](#systemd-timer) section below.
+All standard Ollama API endpoints are proxied transparently:
+- `GET /api/tags` - List models
+- `POST /api/generate` - Generate text
+- `POST /api/chat` - Chat completion
+- `POST /api/pull` - Pull model (queued for off-peak)
+- `DELETE /api/delete` - Delete model
 
-After changing config, restart the service:
+### ohhhllama Extensions
 
+#### Queue Status
 ```bash
-sudo systemctl restart ollama-proxy
+GET /api/queue
 ```
 
-## Usage
+Returns queue status and pending downloads.
 
-### Normal Ollama Commands (unchanged)
-
+#### Health Check
 ```bash
-# List models
-ollama list
-
-# Run a model (if already downloaded)
-ollama run llama2
-
-# Chat API
-curl http://localhost:11434/api/chat -d '{
-  "model": "llama2",
-  "messages": [{"role": "user", "content": "Hello!"}]
-}'
+GET /api/health
 ```
 
-### Pull Requests (queued)
+Returns system health including disk space and service status.
 
+#### Queue HuggingFace Model
 ```bash
-# Request a model - gets queued
-curl http://localhost:11434/api/pull -d '{"name": "llama2:70b"}'
-# Response: {"status": "queued", "message": "Model llama2:70b added to download queue"}
+POST /api/hf/queue
+Content-Type: application/json
 
-# Check queue status
-curl http://localhost:11434/api/queue
-# Response: {"queue": [{"model": "llama2:70b", "status": "pending", ...}]}
+{
+  "repo_id": "TheBloke/Llama-2-7B-GGUF",
+  "quant": "Q4_K_M",      # Optional, default: Q4_K_M
+  "name": "my-llama"      # Optional, custom Ollama model name
+}
 ```
 
-### Health Check
+## HuggingFace Integration
 
-```bash
-# Check system health
-curl http://localhost:11434/api/health
-# Response:
-# {
-#   "status": "healthy",
-#   "checks": {
-#     "proxy": {"status": "ok"},
-#     "backend": {"status": "ok", "url": "http://127.0.0.1:11435"},
-#     "disk": {"status": "ok", "path": "/data/ollama", "used_percent": 45, "free_gb": 248},
-#     "database": {"status": "ok", "path": "/var/lib/ohhhllama/queue.db"}
-#   },
-#   "timestamp": "2024-..."
-# }
+### Supported Sources
+
+1. **GGUF Repositories** (recommended)
+   - Pre-quantized models ready for Ollama
+   - Providers: TheBloke, bartowski, QuantFactory, mradermacher
+   - Example: `TheBloke/Mistral-7B-v0.1-GGUF`
+
+2. **Standard HuggingFace Models**
+   - Automatically converted to GGUF
+   - Requires supported architecture
+
+### Supported Architectures
+
+Models with these architectures can be converted:
+- LlamaForCausalLM (Llama, Llama 2, Llama 3)
+- MistralForCausalLM, MixtralForCausalLM
+- Qwen2ForCausalLM
+- PhiForCausalLM, Phi3ForCausalLM
+- GemmaForCausalLM, Gemma2ForCausalLM
+- FalconForCausalLM
+- GPT2LMHeadModel, GPTNeoXForCausalLM
+- StableLmForCausalLM
+- OlmoForCausalLM
+
+### Quantization Options
+
+| Type | Bits | Quality | Size | Use Case |
+|------|------|---------|------|----------|
+| Q8_0 | 8 | Best | Large | Maximum quality |
+| Q5_K_M | 5.5 | Better | Medium | Quality-focused |
+| Q4_K_M | 4.5 | Good | Small | **Recommended default** |
+| Q3_K_M | 3.4 | Lower | Smaller | Memory constrained |
+
+## Directory Structure
+
 ```
+/opt/ohhhllama/
+├── proxy.py                 # Main proxy server
+├── ohhhllama.conf           # Configuration
+├── scripts/
+│   └── process-queue.sh     # Queue processor
+├── huggingface/
+│   ├── hf_backend.py        # HuggingFace module
+│   ├── requirements.txt
+│   └── .venv/               # Python environment
+└── ...
 
-Health status values:
-- `healthy` - All systems operational
-- `degraded` - Some non-critical issues (e.g., disk warning)
-- `unhealthy` - Critical issues (e.g., backend down, disk full)
+/data/
+├── ollama/                  # Ollama model storage
+│   ├── models/
+│   └── modelfiles/
+└── huggingface/             # HuggingFace cache
+    └── gguf/                # Downloaded GGUF files
 
-### Queue Management
-
-```bash
-# View queue
-curl http://localhost:11434/api/queue
-
-# Remove a model from queue
-curl -X DELETE http://localhost:11434/api/queue -d '{"name": "llama2:70b"}'
-
-# Process queue manually (as root)
-sudo /opt/ohhhllama/scripts/process-queue.sh
-
-# View queue database directly
-sudo sqlite3 /var/lib/ohhhllama/queue.db "SELECT * FROM queue;"
+/var/lib/ohhhllama/
+└── queue.db                 # SQLite queue database
 ```
-
-### OpenWebUI Integration
-
-ohhhllama is fully compatible with OpenWebUI. Queued models appear in the model list with a `* [QUEUED]` prefix, making them easy to identify.
-
-When you delete a queued model through OpenWebUI's model management interface (or via `ollama rm`), ohhhllama automatically:
-1. Detects that it's a queued model (not a real Ollama model)
-2. Removes it from the download queue
-3. Returns success to the client
-
-This means you can manage your download queue directly from OpenWebUI without needing to use the `/api/queue` endpoint.
 
 ## Service Management
 
 ```bash
-# Check proxy status
+# Proxy service
 sudo systemctl status ollama-proxy
-
-# View proxy logs
+sudo systemctl restart ollama-proxy
 sudo journalctl -u ollama-proxy -f
 
-# Restart proxy
-sudo systemctl restart ollama-proxy
-
-# Check Ollama container
-docker ps | grep ollama
-docker logs ollama
-```
-
-## Systemd Timer
-
-Queue processing is handled by a systemd timer that runs at 10 PM daily by default.
-
-### Check Timer Status
-
-```bash
-# View timer status and next run time
+# Queue timer
 sudo systemctl list-timers ollama-queue.timer
+sudo systemctl start ollama-queue.service  # Process now
 
-# Check if timer is enabled
-sudo systemctl status ollama-queue.timer
+# Queue processor logs
+sudo journalctl -u ollama-queue.service -n 50
 ```
 
-### Change Schedule
+## Scheduled Downloads
 
-Edit the timer file to change when queue processing runs:
+By default, queued downloads run at 10 PM daily. To change:
 
 ```bash
 sudo nano /etc/systemd/system/ollama-queue.timer
-```
-
-Modify the `OnCalendar` line. Examples:
-- `OnCalendar=*-*-* 22:00:00` - 10 PM daily (default)
-- `OnCalendar=*-*-* 03:00:00` - 3 AM daily
-- `OnCalendar=Sat *-*-* 04:00:00` - 4 AM on Saturdays only
-- `OnCalendar=*-*-* 01,13:00:00` - 1 AM and 1 PM daily
-
-After editing, reload and restart:
-
-```bash
 sudo systemctl daemon-reload
 sudo systemctl restart ollama-queue.timer
 ```
 
-### Run Queue Manually
-
-```bash
-# Process queue immediately (don't wait for timer)
-sudo systemctl start ollama-queue.service
-```
-
-### View Queue Logs
-
-```bash
-# View recent queue processing logs
-sudo journalctl -u ollama-queue.service -n 50
-
-# Follow logs in real-time
-sudo journalctl -u ollama-queue.service -f
-```
-
-## External Storage Setup
-
-For production use, it's recommended to store Ollama models on a dedicated partition to avoid filling up your root filesystem.
-
-### Setting Up /data Partition
-
-1. **Create and mount the partition:**
-   ```bash
-   # Example: Format and mount a new disk
-   sudo mkfs.ext4 /dev/sdb1
-   sudo mkdir /data
-   sudo mount /dev/sdb1 /data
-   
-   # Add to /etc/fstab for persistence
-   echo '/dev/sdb1 /data ext4 defaults 0 2' | sudo tee -a /etc/fstab
-   ```
-
-2. **Create the Ollama data directory:**
-   ```bash
-   sudo mkdir -p /data/ollama
-   sudo chown root:root /data/ollama
-   sudo chmod 755 /data/ollama
-   ```
-
-3. **Install ohhhllama:**
-   The installer will automatically detect and use `/data/ollama` for model storage.
-
-### Disk Space Monitoring
-
-ohhhllama monitors disk space and:
-- Rejects new pull requests when disk usage exceeds `DISK_THRESHOLD` (default: 90%)
-- Reports disk status via the `/api/health` endpoint
-- Checks disk space before each download in the queue processor
-
-Configure thresholds in `/opt/ohhhllama/ohhhllama.conf`:
-```bash
-DISK_PATH=/data/ollama
-DISK_THRESHOLD=90
-```
+Timer format uses systemd calendar syntax:
+- `OnCalendar=*-*-* 22:00:00` - Daily at 10 PM
+- `OnCalendar=*-*-* 03:00:00` - Daily at 3 AM
 
 ## Troubleshooting
 
-### Proxy won't start
-
-```bash
-# Check if port 11434 is in use
-sudo lsof -i :11434
-
-# Check service logs
-sudo journalctl -u ollama-proxy -n 50
-
-# Verify Ollama is running
-curl http://127.0.0.1:11435/api/tags
-```
-
 ### Models not downloading
 
-```bash
-# Check timer status
-sudo systemctl list-timers ollama-queue.timer
+1. Check queue status: `ohhhllama` → View queue
+2. Check logs: `sudo journalctl -u ollama-queue.service -n 50`
+3. Process manually: `sudo systemctl start ollama-queue.service`
 
-# Run queue processor manually
-sudo systemctl start ollama-queue.service
+### HuggingFace downloads failing
 
-# Check queue processor logs
-sudo journalctl -u ollama-queue.service -n 50
+1. Verify venv exists: `ls /opt/ohhhllama/huggingface/.venv`
+2. Check disk space: `df -h /data`
+3. Test manually:
+   ```bash
+   /opt/ohhhllama/huggingface/.venv/bin/python3 \
+     /opt/ohhhllama/huggingface/hf_backend.py \
+     TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+   ```
 
-# Check queue status
-sqlite3 /var/lib/ohhhllama/queue.db "SELECT * FROM queue WHERE status='pending';"
-```
+### Proxy not responding
 
-### Connection refused
+1. Check service: `sudo systemctl status ollama-proxy`
+2. Check Ollama container: `sudo docker ps | grep ollama`
+3. Restart: `sudo systemctl restart ollama-proxy`
 
-```bash
-# Ensure Ollama container is running
-docker start ollama
-
-# Ensure proxy is running
-sudo systemctl start ollama-proxy
-
-# Test backend directly
-curl http://127.0.0.1:11435/api/tags
-```
-
-### Rate limit hit
+## Uninstallation
 
 ```bash
-# Check your request count
-curl http://localhost:11434/api/queue
-
-# Rate limits reset daily at midnight
-# Or manually clear (careful!):
-sudo sqlite3 /var/lib/ohhhllama/queue.db "DELETE FROM rate_limits;"
-```
-
-## Uninstall
-
-```bash
+cd /path/to/ohhhllama
 sudo ./uninstall.sh
 ```
-
-This will:
-- Stop and disable services
-- Remove installed files
-- Optionally remove Docker container and data
-- Optionally keep or remove the queue database
-
-## Architecture
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical documentation.
-
-## API Reference
-
-See [docs/API.md](docs/API.md) for complete API documentation.
 
 ## License
 
@@ -447,15 +278,4 @@ MIT License - see [LICENSE](LICENSE)
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## Credits
-
-Created by [wildwasser](https://github.com/wildwasser)
-
----
-
-*"Because downloading 70GB at 2 PM is just rude."*
+Contributions welcome! Please open an issue or PR on GitHub.

@@ -1,38 +1,57 @@
 # ohhhllama Configuration
-# Copy this file to /opt/ohhhllama/ohhhllama.conf and customize as needed
-# After changes, restart the service: sudo systemctl restart ollama-proxy
+# Copy to /opt/ohhhllama/ohhhllama.conf and customize
 
-# Ollama backend URL
-# The actual Ollama instance running in Docker on port 11435
+# =============================================================================
+# Proxy Settings
+# =============================================================================
+
+# Ollama backend URL (the actual Ollama instance)
 OLLAMA_BACKEND=http://127.0.0.1:11435
 
-# Proxy listen port
-# This is the port clients connect to (standard Ollama port)
+# Port for the proxy to listen on (clients connect here)
 LISTEN_PORT=11434
 
-# SQLite database path
-# Stores the download queue and rate limit data
+# =============================================================================
+# Queue Settings
+# =============================================================================
+
+# SQLite database path for the download queue
 DB_PATH=/var/lib/ohhhllama/queue.db
 
-# Max model requests per IP per day
-# Set to 0 to disable rate limiting
+# Rate limit: maximum model requests per IP per day
 RATE_LIMIT=5
 
-# Disk space monitoring
-# Path to monitor for disk space (should be where Ollama stores models)
-DISK_PATH=/data/ollama
-
-# Disk usage threshold (percent)
-# New pull requests will be rejected when usage exceeds this threshold
-DISK_THRESHOLD=90
-
-# Auto-cleanup
-# Remove completed/failed queue entries older than this many days
+# Days to keep completed/failed entries before cleanup
 CLEANUP_DAYS=30
 
-# Queue processing schedule
-# The schedule is controlled by the systemd timer, not this config file.
-# To change when queue processing runs, edit the timer:
-#   sudo nano /etc/systemd/system/ollama-queue.timer
-# Then reload: sudo systemctl daemon-reload && sudo systemctl restart ollama-queue.timer
-# Default: 3 AM daily (OnCalendar=*-*-* 03:00:00)
+# =============================================================================
+# Disk Monitoring
+# =============================================================================
+
+# Path to monitor for disk space (should be where models are stored)
+DISK_PATH=/data/ollama
+
+# Disk usage threshold (percent) - downloads blocked above this
+DISK_THRESHOLD=90
+
+# =============================================================================
+# HuggingFace Settings
+# =============================================================================
+
+# Cache directory for HuggingFace downloads
+HF_CACHE_DIR=/data/huggingface
+
+# Default quantization for HuggingFace models
+# Options: Q8_0, Q6_K, Q5_K_M, Q5_K_S, Q4_K_M, Q4_K_S, Q4_0, Q3_K_M, Q3_K_S, Q2_K
+DEFAULT_QUANT=Q4_K_M
+
+# HuggingFace token for gated models (optional)
+# Get from: https://huggingface.co/settings/tokens
+# HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxx
+
+# =============================================================================
+# Docker Settings
+# =============================================================================
+
+# Ollama Docker container name
+OLLAMA_CONTAINER=ollama

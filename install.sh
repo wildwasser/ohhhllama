@@ -191,10 +191,11 @@ install_ollama() {
     
     # Run container
     log_info "Starting Ollama container on port 11435..."
+    mkdir -p /data/ollama
     docker run -d \
         --name ollama \
         -p 127.0.0.1:11435:11434 \
-        -v ollama:/root/.ollama \
+        -v /data/ollama:/root/.ollama \
         --restart unless-stopped \
         ollama/ollama:latest
     
@@ -228,6 +229,21 @@ install_proxy() {
     cp "$SCRIPT_DIR/proxy/proxy.py" "$INSTALL_DIR/proxy.py"
     cp "$SCRIPT_DIR/scripts/process-queue.sh" "$INSTALL_DIR/scripts/process-queue.sh"
     cp "$SCRIPT_DIR/config/ohhhllama.conf.example" "$INSTALL_DIR/ohhhllama.conf.example"
+    
+    # Copy HuggingFace module
+    if [[ -d "$SCRIPT_DIR/huggingface" ]]; then
+        log_info "Copying HuggingFace module..."
+        mkdir -p "$INSTALL_DIR/huggingface"
+        cp -r "$SCRIPT_DIR/huggingface/"* "$INSTALL_DIR/huggingface/"
+        
+        # Set up venv if not exists
+        if [[ ! -d "$INSTALL_DIR/huggingface/.venv" ]]; then
+            log_info "Setting up HuggingFace Python environment..."
+            python3 -m venv "$INSTALL_DIR/huggingface/.venv"
+            "$INSTALL_DIR/huggingface/.venv/bin/pip" install --upgrade pip
+            "$INSTALL_DIR/huggingface/.venv/bin/pip" install -r "$INSTALL_DIR/huggingface/requirements.txt"
+        fi
+    fi
     
     # Make scripts executable
     chmod +x "$INSTALL_DIR/scripts/process-queue.sh"

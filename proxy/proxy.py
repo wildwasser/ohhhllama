@@ -98,6 +98,7 @@ def init_database() -> None:
         CREATE TABLE IF NOT EXISTS queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             model TEXT NOT NULL,
+            type TEXT DEFAULT 'ollama',
             requester_ip TEXT NOT NULL,
             status TEXT DEFAULT 'pending',
             error TEXT,
@@ -105,6 +106,13 @@ def init_database() -> None:
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # Migration: add type column if it doesn't exist
+    cursor.execute("PRAGMA table_info(queue)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'type' not in columns:
+        cursor.execute("ALTER TABLE queue ADD COLUMN type TEXT DEFAULT 'ollama'")
+        logger.info("Added 'type' column to queue table")
     
     # Rate limiting table
     cursor.execute("""
@@ -256,7 +264,7 @@ def get_queue_status() -> dict:
     
     # Get pending items
     cursor.execute("""
-        SELECT id, model, requester_ip, status, created_at, updated_at
+        SELECT id, model, type, requester_ip, status, created_at, updated_at
         FROM queue
         WHERE status IN ('pending', 'downloading')
         ORDER BY created_at ASC
@@ -268,10 +276,11 @@ def get_queue_status() -> dict:
         pending.append({
             "id": row[0],
             "model": row[1],
-            "requester_ip": row[2],
-            "status": row[3],
-            "created_at": row[4],
-            "updated_at": row[5]
+            "type": row[2] or "ollama",
+            "requester_ip": row[3],
+            "status": row[4],
+            "created_at": row[5],
+            "updated_at": row[6]
         })
     
     # Get recent completed/failed
@@ -360,6 +369,62 @@ def cleanup_old_entries() -> int:
         logger.info(f"Cleaned up {count} old entries (older than {CLEANUP_DAYS} days)")
     
     return count
+
+
+def verify_completed_models() -> int:
+    """
+    Verify that 'completed' models actually exist in Ollama.
+    
+    If a model is marked 'completed' but doesn't exist in Ollama,
+    reset it to 'pending' so it gets re-downloaded.
+    
+    Returns:
+        Number of entries reset to pending.
+    """
+    # Get list of actual models from Ollama
+    actual_models = set()
+    try:
+        url = f"{OLLAMA_BACKEND}/api/tags"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            for m in data.get("models", []):
+                name = m.get("name", "")
+                actual_models.add(name)
+                actual_models.add(name.split(":")[0])  # Also add base name
+    except Exception as e:
+        logger.warning(f"Could not verify completed models: {e}")
+        return 0
+    
+    # Check completed entries against actual models
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT id, model FROM queue WHERE status = 'completed'
+    """)
+    
+    orphaned_ids = []
+    for row in cursor.fetchall():
+        queue_id, model = row
+        model_base = model.split(":")[0]
+        if model not in actual_models and model_base not in actual_models:
+            orphaned_ids.append(queue_id)
+            logger.info(f"Model '{model}' marked completed but not found in Ollama")
+    
+    # Reset orphaned entries to pending
+    if orphaned_ids:
+        placeholders = ",".join("?" * len(orphaned_ids))
+        cursor.execute(f"""
+            UPDATE queue
+            SET status = 'pending', updated_at = datetime('now')
+            WHERE id IN ({placeholders})
+        """, orphaned_ids)
+        conn.commit()
+        logger.info(f"Reset {len(orphaned_ids)} orphaned 'completed' entries to 'pending'")
+    
+    conn.close()
+    return len(orphaned_ids)
 
 
 def check_model_exists(model: str) -> bool:
@@ -462,6 +527,77 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
                 "error": "Internal proxy error",
                 "detail": str(e)
             })
+    
+    def handle_hf_queue_request(self, body: bytes) -> None:
+        """Handle POST /api/hf/queue - queue a HuggingFace model for download."""
+        client_ip = self.get_client_ip()
+        
+        try:
+            data = json.loads(body.decode())
+        except json.JSONDecodeError:
+            self.send_json_response(400, {"error": "Invalid JSON"})
+            return
+        
+        repo_id = data.get("repo_id") or data.get("model")
+        if not repo_id:
+            self.send_json_response(400, {"error": "repo_id required"})
+            return
+        
+        # Optional parameters
+        quant = data.get("quant", "Q4_K_M")
+        model_name = data.get("name")  # Custom name for Ollama
+        
+        # Check rate limit
+        is_allowed, remaining = check_rate_limit(client_ip)
+        if not is_allowed:
+            self.send_json_response(429, {
+                "error": "Rate limit exceeded",
+                "message": f"Maximum {RATE_LIMIT} model requests per day"
+            })
+            return
+        
+        # Check if already in queue
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM queue 
+            WHERE model = ? AND type = 'huggingface' AND status = 'pending'
+        """, (repo_id,))
+        
+        if cursor.fetchone()[0] > 0:
+            conn.close()
+            self.send_json_response(200, {
+                "status": "already_queued",
+                "message": f"HuggingFace model {repo_id} is already in queue"
+            })
+            return
+        
+        # Add to queue with type='huggingface'
+        # Store quant and custom name in the model field as JSON or use a convention
+        model_data = repo_id
+        if quant != "Q4_K_M" or model_name:
+            # Store as JSON for extra params
+            model_data = json.dumps({"repo_id": repo_id, "quant": quant, "name": model_name})
+        
+        cursor.execute("""
+            INSERT INTO queue (model, type, requester_ip, status)
+            VALUES (?, 'huggingface', ?, 'pending')
+        """, (model_data, client_ip))
+        
+        queue_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        increment_rate_limit(client_ip)
+        
+        logger.info(f"Queued HuggingFace model {repo_id} (id={queue_id}) from {client_ip}")
+        
+        self.send_json_response(202, {
+            "status": "queued",
+            "message": f"HuggingFace model {repo_id} added to download queue",
+            "queue_id": queue_id,
+            "type": "huggingface"
+        })
     
     def handle_pull_request(self, body: bytes) -> None:
         """Handle POST /api/pull requests by queuing them."""
@@ -656,6 +792,8 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
         
         if self.path == "/api/pull":
             self.handle_pull_request(body)
+        elif self.path == "/api/hf/queue":
+            self.handle_hf_queue_request(body)
         else:
             self.proxy_request("POST", body)
     
@@ -796,6 +934,9 @@ def main() -> None:
     
     # Cleanup old completed/failed entries
     cleanup_old_entries()
+    
+    # Verify completed models actually exist
+    verify_completed_models()
     
     # Check disk space
     disk_ok, disk_stats = check_disk_space()

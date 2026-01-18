@@ -1,154 +1,59 @@
 # ohhhllama API Reference
 
-This document describes all API endpoints provided by ohhhllama.
+ohhhllama acts as a transparent proxy for Ollama, adding queue management and HuggingFace integration.
 
-## Base URL
+**Base URL:** `http://localhost:11434`
 
+## Standard Ollama Endpoints
+
+All standard Ollama API endpoints are proxied transparently. See [Ollama API docs](https://github.com/ollama/ollama/blob/main/docs/api.md) for full details.
+
+### List Models
+```http
+GET /api/tags
 ```
-http://localhost:11434
-```
 
-## Custom Endpoints
-
-These endpoints are specific to ohhhllama and not part of the standard Ollama API.
-
-### GET /api/queue
-
-Get the current download queue status.
-
-**Request:**
-```bash
-curl http://localhost:11434/api/queue
-```
+Returns list of installed models. ohhhllama adds queued models with `[QUEUED]` suffix.
 
 **Response:**
 ```json
 {
-  "counts": {
-    "pending": 3,
-    "downloading": 1,
-    "completed": 15,
-    "failed": 2
-  },
-  "queue": [
+  "models": [
     {
-      "id": 42,
-      "model": "llama2:70b",
-      "requester_ip": "192.168.1.100",
-      "status": "downloading",
-      "created_at": "2024-01-15 14:30:00",
-      "updated_at": "2024-01-16 03:00:05"
+      "name": "llama3:8b",
+      "size": 4661224676,
+      "details": {
+        "family": "llama",
+        "parameter_size": "8B",
+        "quantization_level": "Q4_K_M"
+      }
     },
     {
-      "id": 43,
-      "model": "codellama:34b",
-      "requester_ip": "192.168.1.101",
-      "status": "pending",
-      "created_at": "2024-01-15 16:45:00",
-      "updated_at": "2024-01-15 16:45:00"
-    }
-  ],
-  "recent": [
-    {
-      "id": 41,
-      "model": "mistral:7b",
-      "status": "completed",
-      "error": null,
-      "updated_at": "2024-01-16 03:15:00"
-    },
-    {
-      "id": 40,
-      "model": "invalid-model",
-      "status": "failed",
-      "error": "Download failed after 3 attempts",
-      "updated_at": "2024-01-16 03:10:00"
+      "name": "* mistral [QUEUED]",
+      "model": "mistral",
+      "size": 0,
+      "digest": "pending"
     }
   ]
 }
 ```
 
-**Response Fields:**
+### Pull Model (Queued)
+```http
+POST /api/pull
+Content-Type: application/json
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `counts` | object | Count of items by status |
-| `counts.pending` | integer | Models waiting to download |
-| `counts.downloading` | integer | Models currently downloading |
-| `counts.completed` | integer | Successfully downloaded models |
-| `counts.failed` | integer | Failed downloads |
-| `queue` | array | Pending and downloading items (max 50) |
-| `recent` | array | Recent completed/failed items (max 10) |
-
----
-
-### DELETE /api/queue
-
-Remove a model from the download queue. Only pending models can be removed (not models currently downloading).
-
-**Request:**
-```bash
-curl -X DELETE http://localhost:11434/api/queue -d '{"name": "llama2:70b"}'
+{"name": "llama3:8b"}
 ```
 
-**Request Body:**
+**Note:** Unlike standard Ollama, this queues the download for off-peak processing.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Model name to remove |
-| `model` | string | No | Alternative to `name` |
-
-**Response (Success):**
-```json
-{
-  "status": "deleted",
-  "message": "Model llama2:70b removed from queue"
-}
-```
-
-**Response (Not Found):**
-```json
-{
-  "status": "not_found",
-  "message": "Model llama2:70b not in queue (or already processing)"
-}
-```
-
-**Status Codes:**
-
-| Code | Description |
-|------|-------------|
-| 200 | Model removed successfully |
-| 400 | Invalid request (missing model name or invalid JSON) |
-| 404 | Model not found in queue (or already processing) |
-
----
-
-## Modified Endpoints
-
-These Ollama endpoints have modified behavior in ohhhllama.
-
-### POST /api/pull
-
-Request a model download. Instead of downloading immediately, the request is queued for off-peak processing.
-
-**Request:**
-```bash
-curl http://localhost:11434/api/pull -d '{"name": "llama2:70b"}'
-```
-
-**Request Body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Model name to download |
-| `model` | string | No | Alternative to `name` |
-
-**Response (Queued):**
+**Response:**
 ```json
 {
   "status": "queued",
-  "message": "Model llama2:70b added to download queue",
-  "queue_id": 42,
+  "message": "Model llama3:8b added to download queue",
+  "queue_id": 5,
   "rate_limit": {
     "remaining": 4,
     "limit": 5
@@ -156,46 +61,102 @@ curl http://localhost:11434/api/pull -d '{"name": "llama2:70b"}'
 }
 ```
 
-**Response (Already Queued):**
-```json
+### Delete Model
+```http
+DELETE /api/delete
+Content-Type: application/json
+
+{"name": "llama3:8b"}
+```
+
+Works for both installed models and queued models.
+
+### Generate
+```http
+POST /api/generate
+Content-Type: application/json
+
 {
-  "status": "already_queued",
-  "message": "Model llama2:70b is already in the download queue"
+  "model": "llama3:8b",
+  "prompt": "Hello, world!"
 }
 ```
 
-**Response (Model Exists):**
+Proxied directly to Ollama.
 
-If the model already exists in Ollama, the request passes through to Ollama and returns the standard Ollama response.
+### Chat
+```http
+POST /api/chat
+Content-Type: application/json
 
-**Response (Rate Limited):**
-```json
 {
-  "error": "Rate limit exceeded",
-  "message": "Maximum 5 model requests per day",
-  "remaining": 0
+  "model": "llama3:8b",
+  "messages": [
+    {"role": "user", "content": "Hello!"}
+  ]
 }
 ```
 
-**Status Codes:**
-
-| Code | Description |
-|------|-------------|
-| 202 | Request queued successfully |
-| 200 | Model exists, passed through to Ollama |
-| 400 | Invalid request (missing model name) |
-| 429 | Rate limit exceeded |
+Proxied directly to Ollama.
 
 ---
 
-### GET /api/health
+## ohhhllama Extensions
 
-Get comprehensive system health status.
-
-**Request:**
-```bash
-curl http://localhost:11434/api/health
+### Queue Status
+```http
+GET /api/queue
 ```
+
+Returns current queue status and pending downloads.
+
+**Response:**
+```json
+{
+  "counts": {
+    "pending": 2,
+    "downloading": 0,
+    "completed": 10,
+    "failed": 1
+  },
+  "queue": [
+    {
+      "id": 5,
+      "model": "llama3:8b",
+      "type": "ollama",
+      "requester_ip": "127.0.0.1",
+      "status": "pending",
+      "created_at": "2024-01-15 10:30:00",
+      "updated_at": "2024-01-15 10:30:00"
+    },
+    {
+      "id": 6,
+      "model": "{\"repo_id\": \"TheBloke/Mistral-7B-GGUF\", \"quant\": \"Q4_K_M\"}",
+      "type": "huggingface",
+      "requester_ip": "127.0.0.1",
+      "status": "pending",
+      "created_at": "2024-01-15 10:35:00",
+      "updated_at": "2024-01-15 10:35:00"
+    }
+  ],
+  "recent": [
+    {
+      "id": 4,
+      "model": "phi3:mini",
+      "status": "completed",
+      "error": null,
+      "updated_at": "2024-01-14 22:15:00"
+    }
+  ]
+}
+```
+
+### Health Check
+```http
+GET /api/health
+```
+
+Returns system health status.
 
 **Response:**
 ```json
@@ -204,326 +165,147 @@ curl http://localhost:11434/api/health
   "checks": {
     "proxy": {"status": "ok"},
     "backend": {"status": "ok", "url": "http://127.0.0.1:11435"},
-    "disk": {"status": "ok", "path": "/data/ollama", "used_percent": 45, "free_gb": 248.5},
+    "disk": {
+      "status": "ok",
+      "path": "/data/ollama",
+      "used_percent": 45,
+      "free_gb": 234.5
+    },
     "database": {"status": "ok", "path": "/var/lib/ohhhllama/queue.db"}
   },
-  "timestamp": "2026-01-18T15:30:00Z"
+  "timestamp": "2024-01-15T10:30:00.000000"
 }
 ```
 
-**Response Fields:**
+**Status values:**
+- `healthy` - All systems operational
+- `degraded` - Some non-critical issues
+- `unhealthy` - Critical issues (e.g., disk full)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `status` | string | Overall status: `healthy`, `degraded`, or `unhealthy` |
-| `checks.proxy` | object | Proxy status (always ok if responding) |
-| `checks.backend` | object | Ollama backend connectivity |
-| `checks.disk` | object | Disk space status and metrics |
-| `checks.database` | object | SQLite database status |
-| `timestamp` | string | ISO-8601 timestamp |
+### Remove from Queue
+```http
+DELETE /api/queue
+Content-Type: application/json
 
-**Status Values:**
-
-| Status | Description |
-|--------|-------------|
-| `healthy` | All systems operational |
-| `degraded` | Non-critical issues (disk warning, database error) |
-| `unhealthy` | Critical issues (backend down, disk critical) |
-
-**Disk Status Values:**
-
-| Status | Condition |
-|--------|-----------|
-| `ok` | Usage < threshold - 10% |
-| `warning` | Usage >= threshold - 10% but < threshold |
-| `critical` | Usage >= threshold (default 90%) |
-
----
-
-## Modified Endpoints
-
-These Ollama endpoints have modified behavior in ohhhllama.
-
-### GET /api/tags
-
-List available models. **Modified** to include queued models.
-
-**Request:**
-```bash
-curl http://localhost:11434/api/tags
+{"name": "llama3:8b"}
 ```
 
-**Behavior:**
-- Fetches real models from Ollama backend
-- Queries pending models from download queue
-- Merges queued models into response with `* [QUEUED]` name prefix
-- Queued models appear in OpenWebUI and `ollama list`
+Removes a pending model from the queue (cannot remove if already downloading).
 
-**Response (with queued models):**
+**Response:**
 ```json
 {
-  "models": [
-    {
-      "name": "llama2:latest",
-      "size": 3826793472,
-      "digest": "abc123...",
-      "modified_at": "2026-01-15T10:30:00Z"
-    },
-    {
-      "name": "* codellama:34b [QUEUED]",
-      "size": 0,
-      "digest": "",
-      "modified_at": "2026-01-18T14:00:00Z",
-      "details": {
-        "format": "queued",
-        "family": "queued"
-      }
-    }
-  ]
+  "status": "deleted",
+  "message": "Model llama3:8b removed from queue"
 }
 ```
 
-**Notes:**
-- Queued models have `size: 0` and empty `digest`
-- The `* [QUEUED]` prefix makes them visually distinct
-- Deleting a queued model removes it from the queue (see DELETE /api/delete)
-
 ---
 
-## Pass-Through Endpoints
+## HuggingFace Endpoints
 
-All other Ollama API endpoints pass through unchanged to the backend.
+### Queue HuggingFace Model
+```http
+POST /api/hf/queue
+Content-Type: application/json
 
-### POST /api/generate
-
-Generate a completion.
-
-```bash
-curl http://localhost:11434/api/generate -d '{
-  "model": "llama2",
-  "prompt": "Why is the sky blue?"
-}'
+{
+  "repo_id": "TheBloke/Llama-2-7B-GGUF",
+  "quant": "Q4_K_M",
+  "name": "my-llama"
+}
 ```
 
-### POST /api/chat
+**Parameters:**
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `repo_id` | Yes | - | HuggingFace repository ID |
+| `quant` | No | Q4_K_M | Quantization type |
+| `name` | No | auto | Custom name for Ollama |
 
-Chat with a model.
-
-```bash
-curl http://localhost:11434/api/chat -d '{
-  "model": "llama2",
-  "messages": [
-    {"role": "user", "content": "Hello!"}
-  ]
-}'
-```
-
-### POST /api/embeddings
-
-Generate embeddings.
-
-```bash
-curl http://localhost:11434/api/embeddings -d '{
-  "model": "llama2",
-  "prompt": "The quick brown fox"
-}'
-```
-
-### GET /api/show
-
-Show model information.
-
-```bash
-curl http://localhost:11434/api/show -d '{"name": "llama2"}'
-```
-
-### DELETE /api/delete
-
-Delete a model. **Modified** - intercepted by ohhhllama to handle queued models.
-
-**Behavior:**
-- If the model is queued (pending in download queue): removes from queue, returns success
-- If the model is a real Ollama model: passes through to Ollama backend
-
-This allows OpenWebUI and the ollama CLI to delete queued models (shown as `* modelname [QUEUED]`) through the standard delete interface.
-
-**Request:**
-```bash
-curl -X DELETE http://localhost:11434/api/delete -d '{"name": "llama2"}'
-```
-
-**Request Body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Model name to delete |
-| `model` | string | No | Alternative to `name` |
-
-**Response (Queued Model Deleted):**
+**Response:**
 ```json
 {
-  "status": "success"
+  "status": "queued",
+  "message": "HuggingFace model TheBloke/Llama-2-7B-GGUF added to download queue",
+  "queue_id": 7,
+  "type": "huggingface"
 }
 ```
 
-**Response (Real Model):**
-Standard Ollama response (passed through to backend).
+**Finding Models:**
+- Browse GGUF models: https://huggingface.co/models?library=gguf
+- Popular providers: TheBloke, bartowski, QuantFactory
 
-**Status Codes:**
-
-| Code | Description |
-|------|-------------|
-| 200 | Model deleted (queued or real) |
-| 400 | Invalid request (missing model name or invalid JSON) |
-| 404 | Model not found (from Ollama backend) |
-
----
-
-### POST /api/copy
-
-Copy a model.
-
-```bash
-curl http://localhost:11434/api/copy -d '{
-  "source": "llama2",
-  "destination": "llama2-backup"
-}'
-```
-
-### POST /api/create
-
-Create a model from a Modelfile.
-
-```bash
-curl http://localhost:11434/api/create -d '{
-  "name": "my-model",
-  "modelfile": "FROM llama2\nSYSTEM You are a helpful assistant."
-}'
-```
-
-### GET /
-
-Health check / version info.
-
-```bash
-curl http://localhost:11434/
-```
+**Quantization Options:**
+| Type | Quality | Size | Recommended For |
+|------|---------|------|-----------------|
+| Q8_0 | Best | Large | Maximum quality |
+| Q5_K_M | Better | Medium | Quality-focused |
+| Q4_K_M | Good | Small | General use (default) |
+| Q3_K_M | Lower | Smaller | Memory constrained |
 
 ---
 
 ## Error Responses
 
-All error responses follow this format:
+All endpoints return errors in this format:
 
 ```json
 {
   "error": "Error type",
-  "detail": "Detailed error message"
+  "message": "Detailed error message",
+  "detail": "Additional context (optional)"
 }
 ```
 
-### Common Errors
+### Common Error Codes
 
-| Code | Error | Description |
-|------|-------|-------------|
-| 400 | Invalid JSON | Request body is not valid JSON |
-| 400 | Model name required | Missing `name` or `model` field |
-| 429 | Rate limit exceeded | Too many pull requests today |
-| 502 | Backend unavailable | Cannot connect to Ollama |
-| 500 | Internal proxy error | Unexpected proxy error |
+| Code | Meaning |
+|------|---------|
+| 400 | Bad request (invalid JSON, missing parameters) |
+| 404 | Model or resource not found |
+| 429 | Rate limit exceeded |
+| 502 | Ollama backend unavailable |
+| 507 | Insufficient storage |
 
----
+### Rate Limiting
 
-## Rate Limiting
-
-Pull requests are rate-limited per IP address:
-
-- **Default limit**: 5 requests per day per IP
-- **Reset time**: Midnight (server time)
-- **Scope**: Only affects `/api/pull` for new models
-
-Rate limit information is included in successful queue responses:
-
+When rate limited:
 ```json
 {
-  "rate_limit": {
-    "remaining": 4,
-    "limit": 5
-  }
+  "error": "Rate limit exceeded",
+  "message": "Maximum 5 model requests per day",
+  "remaining": 0
 }
 ```
 
----
-
-## Headers
-
-### Request Headers
-
-| Header | Description |
-|--------|-------------|
-| `Content-Type` | Should be `application/json` for POST requests |
-| `X-Forwarded-For` | Used to determine client IP (for proxied requests) |
-
-### Response Headers
-
-| Header | Description |
-|--------|-------------|
-| `Content-Type` | `application/json` for JSON responses |
-| `Content-Length` | Response body size |
+Rate limits reset daily at midnight.
 
 ---
 
 ## Examples
 
-### Queue a model and check status
-
+### Queue multiple models
 ```bash
-# Queue a large model
-curl http://localhost:11434/api/pull -d '{"name": "llama2:70b"}'
+# Ollama models
+curl -X POST http://localhost:11434/api/pull -d '{"name": "llama3:8b"}'
+curl -X POST http://localhost:11434/api/pull -d '{"name": "mistral"}'
 
-# Check queue status
-curl http://localhost:11434/api/queue | jq .
-
-# Wait for 3 AM processing, then verify
-curl http://localhost:11434/api/tags | jq '.models[].name'
+# HuggingFace models
+curl -X POST http://localhost:11434/api/hf/queue \
+  -H "Content-Type: application/json" \
+  -d '{"repo_id": "TheBloke/Mistral-7B-v0.1-GGUF"}'
 ```
 
-### Use with ollama CLI
-
-The ollama CLI works normally for most operations:
-
+### Check queue and health
 ```bash
-# These work immediately
-ollama list
-ollama run llama2  # if already downloaded
-ollama show llama2
+# Queue status
+curl http://localhost:11434/api/queue | jq
 
-# This gets queued
-ollama pull llama2:70b
-# Note: CLI may show unexpected output since response format differs
+# Health check
+curl http://localhost:11434/api/health | jq
 ```
 
-### Integration with applications
-
-```python
-import requests
-
-# Queue a model
-response = requests.post(
-    "http://localhost:11434/api/pull",
-    json={"name": "codellama:34b"}
-)
-result = response.json()
-
-if result.get("status") == "queued":
-    print(f"Model queued, ID: {result['queue_id']}")
-    print(f"Remaining requests today: {result['rate_limit']['remaining']}")
-elif result.get("status") == "already_queued":
-    print("Model already in queue")
-else:
-    print("Model exists or error occurred")
-
-# Check queue
-queue = requests.get("http://localhost:11434/api/queue").json()
-print(f"Pending downloads: {queue['counts']['pending']}")
-```
+### Use with OpenWebUI
+OpenWebUI connects to `http://localhost:11434` - no configuration needed. Queued models appear with `[QUEUED]` suffix in the model list.

@@ -17,6 +17,7 @@ NC='\033[0m' # No Color
 INSTALL_DIR="/opt/ohhhllama"
 DATA_DIR="/var/lib/ohhhllama"
 OLLAMA_DATA_PATH="/data/ollama"
+HUGGINGFACE_DATA_PATH="/data/huggingface"
 
 # Logging functions
 log_info() {
@@ -194,13 +195,8 @@ handle_docker() {
             docker rm ollama 2>/dev/null || true
             log_success "Removed Ollama container"
             
-            echo ""
-            if ask_yes_no "Remove Ollama Docker volume (contains downloaded models)?"; then
-                docker volume rm ollama 2>/dev/null || true
-                log_success "Removed Ollama volume"
-            else
-                log_info "Keeping Ollama volume (models preserved)"
-            fi
+            # Note: Models are stored in /data/ollama bind mount, not a Docker volume
+            # The handle_external_storage() function handles cleanup of /data/ollama
         else
             log_info "Keeping Ollama container"
         fi
@@ -228,6 +224,24 @@ handle_external_storage() {
         fi
     else
         log_info "$OLLAMA_DATA_PATH not found"
+    fi
+    
+    # Handle HuggingFace cache
+    if [[ -d "$HUGGINGFACE_DATA_PATH" ]]; then
+        local hf_size
+        hf_size=$(du -sh "$HUGGINGFACE_DATA_PATH" 2>/dev/null | cut -f1 || echo "unknown")
+        log_info "Found HuggingFace cache at $HUGGINGFACE_DATA_PATH (size: $hf_size)"
+        
+        echo ""
+        echo -e "${YELLOW}WARNING: This directory contains your HuggingFace model cache.${NC}"
+        if ask_yes_no "Remove $HUGGINGFACE_DATA_PATH (HuggingFace cache will be deleted)?"; then
+            rm -rf "$HUGGINGFACE_DATA_PATH"
+            log_success "Removed $HUGGINGFACE_DATA_PATH"
+        else
+            log_info "Keeping $HUGGINGFACE_DATA_PATH (HuggingFace cache preserved)"
+        fi
+    else
+        log_info "$HUGGINGFACE_DATA_PATH not found"
     fi
 }
 
@@ -265,7 +279,11 @@ print_summary() {
     fi
     
     if [[ -d "$OLLAMA_DATA_PATH" ]]; then
-        remaining+=("External storage: $OLLAMA_DATA_PATH")
+        remaining+=("Ollama data: $OLLAMA_DATA_PATH")
+    fi
+    
+    if [[ -d "$HUGGINGFACE_DATA_PATH" ]]; then
+        remaining+=("HuggingFace cache: $HUGGINGFACE_DATA_PATH")
     fi
     
     if [[ ${#remaining[@]} -gt 0 ]]; then
