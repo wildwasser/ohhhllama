@@ -1,6 +1,6 @@
 # ohhhllama
 
-**Version 1.0.0** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
+**Version 1.0.1** | [Documentation](docs/) | [Report Issue](https://github.com/wildwasser/ohhhllama/issues)
 
 **Bandwidth-friendly Ollama with download queuing**
 
@@ -10,7 +10,7 @@ Stop your Ollama server from downloading 70GB models during peak hours. ohhhllam
 
 - **Transparent Proxy** - Drop-in replacement for Ollama API on port 11434
 - **Download Queue** - Model pulls are queued, not executed immediately
-- **Off-Peak Processing** - Queue processes at 3 AM (configurable)
+- **Off-Peak Processing** - Queue processes at 10 PM (configurable)
 - **Request Deduplication** - Same model requested 10 times? Downloaded once
 - **Rate Limiting** - Prevent abuse with per-IP daily limits
 - **SQLite Storage** - Simple, reliable, no external dependencies
@@ -30,6 +30,21 @@ git clone https://github.com/wildwasser/ohhhllama.git
 cd ohhhllama
 sudo ./install.sh
 ```
+
+## Quick Reference
+
+After installation, run `ohhhllama` from anywhere to see status and common commands:
+
+```bash
+ohhhllama
+```
+
+This shows:
+- Service status (proxy, timer, Ollama container)
+- Current queue status
+- Disk usage
+- Common commands cheat sheet
+- Configuration file locations
 
 ## Requirements
 
@@ -91,7 +106,7 @@ df -h
 
 1. Client requests `POST /api/pull` for a model
 2. Proxy intercepts, adds to SQLite queue, returns "queued" response
-3. At 3 AM, systemd timer triggers queue processing and downloads models
+3. At 10 PM, systemd timer triggers queue processing and downloads models
 4. All other API calls pass through unchanged to Ollama
 
 ## Configuration
@@ -208,7 +223,7 @@ docker logs ollama
 
 ## Systemd Timer
 
-Queue processing is handled by a systemd timer that runs at 3 AM daily by default.
+Queue processing is handled by a systemd timer that runs at 10 PM daily by default.
 
 ### Check Timer Status
 
@@ -229,8 +244,8 @@ sudo nano /etc/systemd/system/ollama-queue.timer
 ```
 
 Modify the `OnCalendar` line. Examples:
-- `OnCalendar=*-*-* 03:00:00` - 3 AM daily (default)
-- `OnCalendar=*-*-* 02:00:00` - 2 AM daily
+- `OnCalendar=*-*-* 22:00:00` - 10 PM daily (default)
+- `OnCalendar=*-*-* 03:00:00` - 3 AM daily
 - `OnCalendar=Sat *-*-* 04:00:00` - 4 AM on Saturdays only
 - `OnCalendar=*-*-* 01,13:00:00` - 1 AM and 1 PM daily
 

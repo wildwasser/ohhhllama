@@ -232,6 +232,11 @@ install_proxy() {
     # Make scripts executable
     chmod +x "$INSTALL_DIR/scripts/process-queue.sh"
     
+    # Install status command globally
+    log_info "Installing ohhhllama status command..."
+    cp "$SCRIPT_DIR/scripts/ohhhllama-status.sh" /usr/local/bin/ohhhllama
+    chmod +x /usr/local/bin/ohhhllama
+    
     # Create default config if not exists
     if [[ ! -f "$INSTALL_DIR/ohhhllama.conf" ]]; then
         cp "$INSTALL_DIR/ohhhllama.conf.example" "$INSTALL_DIR/ohhhllama.conf"
@@ -283,7 +288,7 @@ install_timer() {
     # Enable and start timer
     systemctl enable --now ollama-queue.timer
     
-    log_success "Systemd timer installed (runs at 3 AM daily)"
+    log_success "Systemd timer installed (runs at 10 PM daily)"
 }
 
 # Verify installation
@@ -344,7 +349,7 @@ print_success() {
     echo -e "  ${CYAN}# Check queue${NC}"
     echo "  curl http://localhost:11434/api/queue"
     echo ""
-    echo -e "  ${CYAN}# Process queue now (instead of waiting for 3 AM)${NC}"
+    echo -e "  ${CYAN}# Process queue now (instead of waiting for 10 PM)${NC}"
     echo "  sudo systemctl start ollama-queue.service"
     echo ""
     echo "Service management:"

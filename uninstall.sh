@@ -143,6 +143,12 @@ remove_install_dir() {
     else
         log_info "$INSTALL_DIR not found"
     fi
+    
+    # Remove global status command
+    if [[ -f /usr/local/bin/ohhhllama ]]; then
+        rm -f /usr/local/bin/ohhhllama
+        log_success "Removed /usr/local/bin/ohhhllama"
+    fi
 }
 
 # Handle data directory
