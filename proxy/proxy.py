@@ -581,12 +581,71 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
         
         self.send_json_response(200, response)
     
+    def handle_tags_request(self) -> None:
+        """Handle /api/tags - merge real models with queued models."""
+        # 1. Fetch real models from backend
+        try:
+            url = f"{OLLAMA_BACKEND}/api/tags"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode())
+        except Exception as e:
+            logger.error(f"Failed to fetch tags from backend: {e}")
+            self.send_json_response(502, {"error": "Backend unavailable"})
+            return
+        
+        # 2. Get pending models from queue
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT model, created_at FROM queue 
+            WHERE status = 'pending' 
+            ORDER BY created_at ASC
+        """)
+        pending = cursor.fetchall()
+        conn.close()
+        
+        # 3. Get list of real model names for dedup
+        real_model_names = set()
+        for m in data.get("models", []):
+            name = m.get("name", "")
+            real_model_names.add(name)
+            real_model_names.add(name.split(":")[0])  # Also add base name
+        
+        # 4. Append queued models (if not already downloaded)
+        for model_name, created_at in pending:
+            # Skip if model already exists
+            base_name = model_name.split(":")[0]
+            if model_name in real_model_names or base_name in real_model_names:
+                continue
+            
+            # Add synthetic entry for queued model
+            data["models"].append({
+                "name": f"* {model_name} [QUEUED]",
+                "model": model_name,
+                "modified_at": created_at,
+                "size": 0,
+                "digest": "pending",
+                "details": {
+                    "parent_model": "",
+                    "format": "pending",
+                    "family": "queued",
+                    "families": ["queued"],
+                    "parameter_size": "unknown",
+                    "quantization_level": "N/A"
+                }
+            })
+        
+        self.send_json_response(200, data)
+    
     def do_GET(self) -> None:
         """Handle GET requests."""
         if self.path == "/api/queue":
             self.handle_queue_request()
         elif self.path == "/api/health":
             self.handle_health_request()
+        elif self.path == "/api/tags":
+            self.handle_tags_request()
         else:
             self.proxy_request("GET")
     
