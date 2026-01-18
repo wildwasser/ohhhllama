@@ -35,6 +35,7 @@ sudo ./install.sh
 - Docker (installed automatically if missing)
 - Python 3.8+
 - Root/sudo access for installation
+- External storage partition mounted at `/data` (recommended for model storage)
 
 ## How It Works
 
@@ -79,6 +80,9 @@ sudo nano /opt/ohhhllama/ohhhllama.conf
 | `LISTEN_PORT` | `11434` | Proxy listen port |
 | `DB_PATH` | `/var/lib/ohhhllama/queue.db` | SQLite database path |
 | `RATE_LIMIT` | `5` | Max model requests per IP per day |
+| `DISK_PATH` | `/data/ollama` | Path to monitor for disk space |
+| `DISK_THRESHOLD` | `90` | Disk usage threshold (percent) |
+| `CLEANUP_DAYS` | `30` | Auto-cleanup old entries after N days |
 
 > **Note:** Queue processing schedule is controlled by the systemd timer. See [Systemd Timer](#systemd-timer) section below.
 
@@ -117,6 +121,29 @@ curl http://localhost:11434/api/pull -d '{"name": "llama2:70b"}'
 curl http://localhost:11434/api/queue
 # Response: {"queue": [{"model": "llama2:70b", "status": "pending", ...}]}
 ```
+
+### Health Check
+
+```bash
+# Check system health
+curl http://localhost:11434/api/health
+# Response:
+# {
+#   "status": "healthy",
+#   "checks": {
+#     "proxy": {"status": "ok"},
+#     "backend": {"status": "ok", "url": "http://127.0.0.1:11435"},
+#     "disk": {"status": "ok", "path": "/data/ollama", "used_percent": 45, "free_gb": 248},
+#     "database": {"status": "ok", "path": "/var/lib/ohhhllama/queue.db"}
+#   },
+#   "timestamp": "2024-..."
+# }
+```
+
+Health status values:
+- `healthy` - All systems operational
+- `degraded` - Some non-critical issues (e.g., disk warning)
+- `unhealthy` - Critical issues (e.g., backend down, disk full)
 
 ### Queue Management
 
@@ -198,6 +225,46 @@ sudo journalctl -u ollama-queue.service -n 50
 
 # Follow logs in real-time
 sudo journalctl -u ollama-queue.service -f
+```
+
+## External Storage Setup
+
+For production use, it's recommended to store Ollama models on a dedicated partition to avoid filling up your root filesystem.
+
+### Setting Up /data Partition
+
+1. **Create and mount the partition:**
+   ```bash
+   # Example: Format and mount a new disk
+   sudo mkfs.ext4 /dev/sdb1
+   sudo mkdir /data
+   sudo mount /dev/sdb1 /data
+   
+   # Add to /etc/fstab for persistence
+   echo '/dev/sdb1 /data ext4 defaults 0 2' | sudo tee -a /etc/fstab
+   ```
+
+2. **Create the Ollama data directory:**
+   ```bash
+   sudo mkdir -p /data/ollama
+   sudo chown root:root /data/ollama
+   sudo chmod 755 /data/ollama
+   ```
+
+3. **Install ohhhllama:**
+   The installer will automatically detect and use `/data/ollama` for model storage.
+
+### Disk Space Monitoring
+
+ohhhllama monitors disk space and:
+- Rejects new pull requests when disk usage exceeds `DISK_THRESHOLD` (default: 90%)
+- Reports disk status via the `/api/health` endpoint
+- Checks disk space before each download in the queue processor
+
+Configure thresholds in `/opt/ohhhllama/ohhhllama.conf`:
+```bash
+DISK_PATH=/data/ollama
+DISK_THRESHOLD=90
 ```
 
 ## Troubleshooting

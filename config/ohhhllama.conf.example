@@ -18,6 +18,18 @@ DB_PATH=/var/lib/ohhhllama/queue.db
 # Set to 0 to disable rate limiting
 RATE_LIMIT=5
 
+# Disk space monitoring
+# Path to monitor for disk space (should be where Ollama stores models)
+DISK_PATH=/data/ollama
+
+# Disk usage threshold (percent)
+# New pull requests will be rejected when usage exceeds this threshold
+DISK_THRESHOLD=90
+
+# Auto-cleanup
+# Remove completed/failed queue entries older than this many days
+CLEANUP_DAYS=30
+
 # Queue processing schedule
 # The schedule is controlled by the systemd timer, not this config file.
 # To change when queue processing runs, edit the timer:

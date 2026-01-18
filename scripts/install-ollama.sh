@@ -5,6 +5,10 @@
 #
 set -e
 
+# Configuration
+OLLAMA_DATA_PATH="${OLLAMA_DATA_PATH:-/data/ollama}"
+MIN_FREE_SPACE_GB="${MIN_FREE_SPACE_GB:-10}"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -28,6 +32,54 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Check if /data is mounted
+check_data_mount() {
+    local data_parent
+    data_parent=$(dirname "$OLLAMA_DATA_PATH")
+    
+    if ! mountpoint -q "$data_parent" 2>/dev/null; then
+        # Check if it's a subdirectory of a mount
+        if ! df "$data_parent" &>/dev/null; then
+            log_error "$data_parent is not mounted"
+            log_error "Please mount your data partition before running this script"
+            exit 1
+        fi
+    fi
+    log_success "$data_parent is available"
+}
+
+# Check minimum free space
+check_free_space() {
+    local path="$1"
+    local min_gb="$2"
+    
+    # Get free space in GB
+    local free_kb
+    free_kb=$(df -k "$path" 2>/dev/null | tail -1 | awk '{print $4}')
+    local free_gb=$((free_kb / 1024 / 1024))
+    
+    if [[ $free_gb -lt $min_gb ]]; then
+        log_error "Insufficient disk space: ${free_gb}GB free, need at least ${min_gb}GB"
+        exit 1
+    fi
+    log_success "Disk space OK: ${free_gb}GB free (minimum: ${min_gb}GB)"
+}
+
+# Setup data directory with proper permissions
+setup_data_directory() {
+    local path="$1"
+    
+    if [[ ! -d "$path" ]]; then
+        log_info "Creating $path..."
+        mkdir -p "$path"
+    fi
+    
+    # Set ownership and permissions
+    chown root:root "$path"
+    chmod 755 "$path"
+    log_success "Data directory ready: $path (root:root, 755)"
+}
+
 # Check if Docker is available
 if ! command -v docker &> /dev/null; then
     log_error "Docker is not installed. Run install-docker.sh first."
@@ -39,6 +91,12 @@ if ! docker info &> /dev/null; then
     log_error "Docker is not running. Start Docker first."
     exit 1
 fi
+
+# Pre-flight checks
+log_info "Running pre-flight checks..."
+check_data_mount
+check_free_space "$(dirname "$OLLAMA_DATA_PATH")" "$MIN_FREE_SPACE_GB"
+setup_data_directory "$OLLAMA_DATA_PATH"
 
 # Stop and remove existing container
 if docker ps -a --format '{{.Names}}' | grep -q '^ollama$'; then
@@ -66,7 +124,7 @@ docker run -d \
     --name ollama \
     $GPU_FLAGS \
     -p 127.0.0.1:11435:11434 \
-    -v ollama:/root/.ollama \
+    -v "$OLLAMA_DATA_PATH:/root/.ollama" \
     --restart unless-stopped \
     ollama/ollama:latest
 

@@ -267,6 +267,86 @@ PrivateTmp=yes
 - Suitable for small teams (< 50 users)
 - For larger deployments, consider Redis queue
 
+## Disk Space Monitoring
+
+The proxy monitors disk space to prevent storage exhaustion:
+
+### Flow
+
+```
+Pull Request → Check Disk Space → Queue (if OK) or 507 Error (if full)
+                     │
+                     ▼
+              os.statvfs(DISK_PATH)
+                     │
+                     ▼
+              Calculate usage %
+                     │
+                     ▼
+              Compare to DISK_THRESHOLD
+```
+
+### Configuration
+
+```bash
+DISK_PATH=/data/ollama      # Path to monitor
+DISK_THRESHOLD=90           # Reject requests above this %
+```
+
+### Behavior
+
+- **< threshold - 10%**: Status "ok"
+- **>= threshold - 10%**: Status "warning" (still accepts requests)
+- **>= threshold**: Status "critical" (rejects new requests with HTTP 507)
+
+## Health Check Endpoint
+
+The `/api/health` endpoint provides comprehensive system status:
+
+```json
+{
+  "status": "healthy|degraded|unhealthy",
+  "checks": {
+    "proxy": {"status": "ok"},
+    "backend": {"status": "ok|error", "url": "..."},
+    "disk": {"status": "ok|warning|critical", "path": "...", "used_percent": N, "free_gb": N},
+    "database": {"status": "ok|error", "path": "..."}
+  },
+  "timestamp": "ISO-8601"
+}
+```
+
+### Status Determination
+
+- **healthy**: All checks pass
+- **degraded**: Non-critical issues (disk warning, database error)
+- **unhealthy**: Critical issues (backend down, disk critical)
+
+## Cleanup Processes
+
+### Orphan Cleanup (on startup)
+
+When the proxy starts, it resets any entries stuck in "downloading" status back to "pending". These are from interrupted previous runs.
+
+```python
+def cleanup_orphaned_downloads():
+    UPDATE queue SET status = 'pending'
+    WHERE status = 'downloading'
+```
+
+### Auto-cleanup (on startup)
+
+Old completed/failed entries are automatically removed:
+
+```python
+def cleanup_old_entries():
+    DELETE FROM queue
+    WHERE status IN ('completed', 'failed')
+    AND updated_at < datetime('now', '-30 days')
+```
+
+Configurable via `CLEANUP_DAYS` environment variable.
+
 ## Future Improvements
 
 1. **Priority queue** - Urgent models download first

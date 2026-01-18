@@ -31,6 +31,9 @@ OLLAMA_BACKEND = os.environ.get("OLLAMA_BACKEND", "http://127.0.0.1:11435")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "11434"))
 DB_PATH = os.environ.get("DB_PATH", "/var/lib/ohhhllama/queue.db")
 RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "5"))
+DISK_PATH = os.environ.get("DISK_PATH", "/data/ollama")
+DISK_THRESHOLD = int(os.environ.get("DISK_THRESHOLD", "90"))  # percent
+CLEANUP_DAYS = int(os.environ.get("CLEANUP_DAYS", "30"))
 
 # Logging setup
 logging.basicConfig(
@@ -39,6 +42,48 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger(__name__)
+
+
+def check_disk_space() -> tuple[bool, dict]:
+    """
+    Check if disk has enough space.
+    
+    Returns:
+        Tuple of (ok, stats) where ok is True if usage is below threshold.
+        stats contains path, used_percent, free_gb, and status.
+    """
+    try:
+        stat = os.statvfs(DISK_PATH)
+        total_bytes = stat.f_blocks * stat.f_frsize
+        free_bytes = stat.f_bavail * stat.f_frsize
+        used_bytes = total_bytes - free_bytes
+        
+        used_percent = int((used_bytes / total_bytes) * 100) if total_bytes > 0 else 0
+        free_gb = round(free_bytes / (1024 ** 3), 1)
+        
+        if used_percent >= DISK_THRESHOLD:
+            status = "critical"
+            ok = False
+        elif used_percent >= DISK_THRESHOLD - 10:
+            status = "warning"
+            ok = True
+        else:
+            status = "ok"
+            ok = True
+        
+        return ok, {
+            "status": status,
+            "path": DISK_PATH,
+            "used_percent": used_percent,
+            "free_gb": free_gb
+        }
+    except OSError as e:
+        logger.error(f"Failed to check disk space at {DISK_PATH}: {e}")
+        return False, {
+            "status": "error",
+            "path": DISK_PATH,
+            "error": str(e)
+        }
 
 
 def init_database() -> None:
@@ -262,6 +307,61 @@ def get_queue_status() -> dict:
     }
 
 
+def cleanup_orphaned_downloads() -> int:
+    """
+    Reset any 'downloading' status to 'pending' on startup.
+    
+    These are from interrupted previous runs where the process was killed
+    mid-download.
+    
+    Returns:
+        Number of orphaned entries reset.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        UPDATE queue
+        SET status = 'pending', updated_at = datetime('now')
+        WHERE status = 'downloading'
+    """)
+    
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    if count > 0:
+        logger.info(f"Reset {count} orphaned 'downloading' entries to 'pending'")
+    
+    return count
+
+
+def cleanup_old_entries() -> int:
+    """
+    Remove completed/failed entries older than CLEANUP_DAYS.
+    
+    Returns:
+        Number of entries removed.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        DELETE FROM queue
+        WHERE status IN ('completed', 'failed')
+        AND updated_at < datetime('now', ?)
+    """, (f'-{CLEANUP_DAYS} days',))
+    
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    if count > 0:
+        logger.info(f"Cleaned up {count} old entries (older than {CLEANUP_DAYS} days)")
+    
+    return count
+
+
 def check_model_exists(model: str) -> bool:
     """Check if a model already exists in Ollama."""
     try:
@@ -384,6 +484,17 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
             self.proxy_request("POST", body)
             return
         
+        # Check disk space before queueing
+        disk_ok, disk_stats = check_disk_space()
+        if not disk_ok:
+            logger.warning(f"Disk space critical ({disk_stats.get('used_percent', '?')}%), rejecting pull request")
+            self.send_json_response(507, {
+                "error": "Insufficient storage",
+                "message": f"Disk usage at {disk_stats.get('used_percent', '?')}% (threshold: {DISK_THRESHOLD}%)",
+                "disk": disk_stats
+            })
+            return
+        
         # Check rate limit
         is_allowed, remaining = check_rate_limit(client_ip)
         if not is_allowed:
@@ -411,10 +522,71 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
         status = get_queue_status()
         self.send_json_response(200, status)
     
+    def handle_health_request(self) -> None:
+        """
+        Return system health status.
+        
+        Checks:
+        - proxy: Always ok if responding
+        - backend: Ollama backend reachability
+        - disk: Disk space status
+        - database: Database accessibility
+        """
+        checks = {}
+        overall_status = "healthy"
+        
+        # Proxy check (always ok if we're responding)
+        checks["proxy"] = {"status": "ok"}
+        
+        # Backend check
+        try:
+            req = urllib.request.Request(f"{OLLAMA_BACKEND}/api/tags")
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    checks["backend"] = {"status": "ok", "url": OLLAMA_BACKEND}
+                else:
+                    checks["backend"] = {"status": "error", "url": OLLAMA_BACKEND}
+                    overall_status = "degraded"
+        except Exception as e:
+            checks["backend"] = {"status": "error", "url": OLLAMA_BACKEND, "error": str(e)}
+            overall_status = "unhealthy"
+        
+        # Disk check
+        disk_ok, disk_stats = check_disk_space()
+        checks["disk"] = disk_stats
+        if disk_stats.get("status") == "critical":
+            overall_status = "unhealthy"
+        elif disk_stats.get("status") == "warning" and overall_status == "healthy":
+            overall_status = "degraded"
+        elif disk_stats.get("status") == "error":
+            overall_status = "degraded"
+        
+        # Database check
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=5)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            conn.close()
+            checks["database"] = {"status": "ok", "path": DB_PATH}
+        except Exception as e:
+            checks["database"] = {"status": "error", "path": DB_PATH, "error": str(e)}
+            if overall_status == "healthy":
+                overall_status = "degraded"
+        
+        response = {
+            "status": overall_status,
+            "checks": checks,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        self.send_json_response(200, response)
+    
     def do_GET(self) -> None:
         """Handle GET requests."""
         if self.path == "/api/queue":
             self.handle_queue_request()
+        elif self.path == "/api/health":
+            self.handle_health_request()
         else:
             self.proxy_request("GET")
     
@@ -458,9 +630,25 @@ def main() -> None:
     logger.info(f"Listen port: {LISTEN_PORT}")
     logger.info(f"Database: {DB_PATH}")
     logger.info(f"Rate limit: {RATE_LIMIT} requests/day/IP")
+    logger.info(f"Disk path: {DISK_PATH}")
+    logger.info(f"Disk threshold: {DISK_THRESHOLD}%")
+    logger.info(f"Cleanup days: {CLEANUP_DAYS}")
     
     # Initialize database
     init_database()
+    
+    # Cleanup orphaned downloads from interrupted previous runs
+    cleanup_orphaned_downloads()
+    
+    # Cleanup old completed/failed entries
+    cleanup_old_entries()
+    
+    # Check disk space
+    disk_ok, disk_stats = check_disk_space()
+    if disk_ok:
+        logger.info(f"Disk space: {disk_stats.get('used_percent', '?')}% used, {disk_stats.get('free_gb', '?')}GB free")
+    else:
+        logger.warning(f"Disk space critical: {disk_stats.get('used_percent', '?')}% used")
     
     # Test backend connectivity
     try:

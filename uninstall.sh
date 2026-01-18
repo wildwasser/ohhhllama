@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 # Paths
 INSTALL_DIR="/opt/ohhhllama"
 DATA_DIR="/var/lib/ohhhllama"
+OLLAMA_DATA_PATH="/data/ollama"
 
 # Logging functions
 log_info() {
@@ -202,6 +203,28 @@ handle_docker() {
     fi
 }
 
+# Handle external storage data
+handle_external_storage() {
+    log_step "Handling external storage"
+    
+    if [[ -d "$OLLAMA_DATA_PATH" ]]; then
+        local size
+        size=$(du -sh "$OLLAMA_DATA_PATH" 2>/dev/null | cut -f1 || echo "unknown")
+        log_info "Found Ollama data at $OLLAMA_DATA_PATH (size: $size)"
+        
+        echo ""
+        echo -e "${YELLOW}WARNING: This directory contains your downloaded models.${NC}"
+        if ask_yes_no "Remove $OLLAMA_DATA_PATH (downloaded models will be deleted)?"; then
+            rm -rf "$OLLAMA_DATA_PATH"
+            log_success "Removed $OLLAMA_DATA_PATH"
+        else
+            log_info "Keeping $OLLAMA_DATA_PATH (models preserved)"
+        fi
+    else
+        log_info "$OLLAMA_DATA_PATH not found"
+    fi
+}
+
 # Remove log files
 remove_logs() {
     log_step "Removing log files"
@@ -235,6 +258,10 @@ print_summary() {
         remaining+=("Docker volume: ollama")
     fi
     
+    if [[ -d "$OLLAMA_DATA_PATH" ]]; then
+        remaining+=("External storage: $OLLAMA_DATA_PATH")
+    fi
+    
     if [[ ${#remaining[@]} -gt 0 ]]; then
         echo "The following items were kept:"
         for item in "${remaining[@]}"; do
@@ -266,6 +293,7 @@ main() {
     remove_install_dir
     handle_data_dir
     handle_docker
+    handle_external_storage
     remove_logs
     
     print_summary

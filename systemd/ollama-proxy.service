@@ -3,6 +3,7 @@ Description=ohhhllama - Ollama Proxy with Download Queue
 Documentation=https://github.com/wildwasser/ohhhllama
 After=network.target docker.service
 Wants=docker.service
+RequiresMountsFor=/data
 
 [Service]
 Type=simple

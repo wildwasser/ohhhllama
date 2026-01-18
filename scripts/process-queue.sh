@@ -11,6 +11,8 @@ set -e
 # Configuration
 DB_PATH="${DB_PATH:-/var/lib/ohhhllama/queue.db}"
 OLLAMA_BACKEND="${OLLAMA_BACKEND:-http://127.0.0.1:11435}"
+DISK_PATH="${DISK_PATH:-/data/ollama}"
+DISK_THRESHOLD="${DISK_THRESHOLD:-90}"
 LOG_PREFIX="[ohhhllama-queue]"
 MAX_RETRIES=3
 RETRY_DELAY=60
@@ -78,6 +80,33 @@ check_ollama() {
     log_info "Ollama backend is available"
 }
 
+# Check disk space
+check_disk_space() {
+    local path="${DISK_PATH}"
+    local threshold="${DISK_THRESHOLD}"
+    
+    if [[ ! -d "$path" ]]; then
+        log_warn "Disk path $path does not exist, skipping disk check"
+        return 0
+    fi
+    
+    local usage
+    usage=$(df "$path" 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%')
+    
+    if [[ -z "$usage" ]]; then
+        log_warn "Could not determine disk usage for $path"
+        return 0
+    fi
+    
+    if [[ $usage -ge $threshold ]]; then
+        log_error "Disk usage at ${usage}% (threshold: ${threshold}%)"
+        return 1
+    fi
+    
+    log_info "Disk usage: ${usage}% (threshold: ${threshold}%)"
+    return 0
+}
+
 # Get pending models from queue
 get_pending_models() {
     sqlite3 "$DB_PATH" "SELECT DISTINCT model FROM queue WHERE status = 'pending' ORDER BY created_at ASC;"
@@ -100,6 +129,13 @@ update_status() {
 download_model() {
     local model="$1"
     local attempt=1
+    
+    # Check disk space before downloading
+    if ! check_disk_space; then
+        log_error "Skipping $model due to insufficient disk space"
+        update_status "$model" "failed" "Insufficient disk space"
+        return 1
+    fi
     
     log_info "Downloading model: $model"
     update_status "$model" "downloading"
