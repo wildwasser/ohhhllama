@@ -21,6 +21,9 @@ RETRY_DELAY=60
 HF_BACKEND_SCRIPT="${HF_BACKEND_SCRIPT:-/opt/ohhhllama/huggingface/hf_backend.py}"
 HF_VENV="${HF_VENV:-/opt/ohhhllama/huggingface/.venv}"
 
+# Docker configuration
+DOCKER_SAVE_DIR="${DOCKER_SAVE_DIR:-/data/docker}"
+
 # Colors (only if terminal)
 if [[ -t 1 ]]; then
     RED='\033[0;31m'
@@ -192,12 +195,14 @@ download_hf_model() {
     local repo_id
     local quant="Q4_K_M"
     local custom_name=""
+    local convert="true"
     
     if [[ "$model_data" == "{"* ]]; then
         # JSON format - extract fields
         repo_id=$(echo "$model_data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('repo_id',''))")
         quant=$(echo "$model_data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('quant','Q4_K_M'))")
         custom_name=$(echo "$model_data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('name',''))")
+        convert=$(echo "$model_data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(d.get('convert', True)).lower())")
     else
         repo_id="$model_data"
     fi
@@ -215,7 +220,12 @@ download_hf_model() {
         return 1
     fi
     
-    log_info "Downloading HuggingFace model: $repo_id (quant: $quant)"
+    # Log with appropriate message based on convert flag
+    if [[ "$convert" == "true" ]]; then
+        log_info "Downloading HuggingFace model for Ollama: $repo_id (quant: $quant)"
+    else
+        log_info "Downloading HuggingFace model (no conversion): $repo_id"
+    fi
     update_status "$model_data" "downloading"
     
     # Check if venv exists
@@ -225,31 +235,123 @@ download_hf_model() {
         return 1
     fi
     
-    # Build the command
-    local cmd="$HF_VENV/bin/python3 $HF_BACKEND_SCRIPT"
-    
     while [[ $attempt -le $MAX_RETRIES ]]; do
         log_info "Attempt $attempt of $MAX_RETRIES for $repo_id"
         
-        # Run the HuggingFace backend script
-        # Use 'yes' to auto-confirm the prompt
+        # Run the HuggingFace backend
+        local python_cmd="
+import sys
+sys.path.insert(0, '/opt/ohhhllama/huggingface')
+from hf_backend import process_huggingface_model
+import json
+
+result = process_huggingface_model(
+    repo_id='$repo_id',
+    model_name='$custom_name' if '$custom_name' else None,
+    quant='$quant',
+    convert=$([[ "$convert" == "true" ]] && echo "True" || echo "False")
+)
+print(json.dumps(result))
+"
         local output
-        local exit_code
+        local exit_code=0
+        output=$($HF_VENV/bin/python3 -c "$python_cmd" 2>&1) || exit_code=$?
         
-        if [[ -n "$custom_name" ]]; then
-            output=$(echo "y" | $cmd "$repo_id" "$custom_name" "$quant" 2>&1) || exit_code=$?
-        else
-            output=$(echo "y" | $cmd "$repo_id" "" "$quant" 2>&1) || exit_code=$?
+        if [[ $exit_code -eq 0 ]]; then
+            # Check the result status
+            local status=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null)
+            
+            if [[ "$status" == "completed" ]]; then
+                if [[ "$convert" == "true" ]]; then
+                    log_success "Successfully downloaded and converted HuggingFace model: $repo_id"
+                else
+                    log_success "Successfully downloaded HuggingFace model: $repo_id (no conversion)"
+                fi
+                update_status "$model_data" "completed"
+                return 0
+            fi
         fi
-        exit_code=${exit_code:-0}
         
-        if [[ $exit_code -eq 0 ]] && echo "$output" | grep -q "Success\|success\|completed"; then
-            log_success "Successfully downloaded HuggingFace model: $repo_id"
-            update_status "$model_data" "completed"
+        log_warn "HuggingFace download failed (exit code $exit_code)"
+        log_warn "Output: $output"
+        
+        if [[ $attempt -lt $MAX_RETRIES ]]; then
+            log_info "Retrying in $RETRY_DELAY seconds..."
+            sleep $RETRY_DELAY
+        fi
+        
+        ((attempt++)) || true
+    done
+    
+    log_error "Failed to download HuggingFace model $repo_id after $MAX_RETRIES attempts"
+    update_status "$model_data" "failed" "Download failed after $MAX_RETRIES attempts"
+    return 1
+}
+
+# Download and save a Docker image
+download_docker_image() {
+    local image="$1"
+    local attempt=1
+    
+    if [[ -z "$image" ]]; then
+        log_error "Invalid Docker image name"
+        update_status "$image" "failed" "Invalid image name"
+        return 1
+    fi
+    
+    # Check disk space before downloading
+    if ! check_disk_space; then
+        log_error "Skipping $image due to insufficient disk space"
+        update_status "$image" "failed" "Insufficient disk space"
+        return 1
+    fi
+    
+    # Create save directory if needed
+    mkdir -p "$DOCKER_SAVE_DIR"
+    
+    # Generate safe filename from image name
+    # nginx:latest -> nginx_latest.tar
+    # ghcr.io/user/repo:v1.0 -> ghcr.io_user_repo_v1.0.tar
+    local safe_name=$(echo "$image" | tr '/:@' '_')
+    local tar_path="$DOCKER_SAVE_DIR/${safe_name}.tar"
+    
+    log_info "Downloading Docker image: $image"
+    log_info "Will save to: $tar_path"
+    update_status "$image" "downloading"
+    
+    while [[ $attempt -le $MAX_RETRIES ]]; do
+        log_info "Attempt $attempt of $MAX_RETRIES for $image"
+        
+        # Step 1: Pull the image
+        log_info "Pulling image..."
+        if ! sudo docker pull "$image" 2>&1; then
+            log_warn "Docker pull failed"
+            if [[ $attempt -lt $MAX_RETRIES ]]; then
+                log_info "Retrying in $RETRY_DELAY seconds..."
+                sleep $RETRY_DELAY
+                ((attempt++))
+                continue
+            fi
+            log_error "Failed to pull Docker image $image after $MAX_RETRIES attempts"
+            update_status "$image" "failed" "Docker pull failed after $MAX_RETRIES attempts"
+            return 1
+        fi
+        
+        # Step 2: Save the image to tar
+        log_info "Saving image to $tar_path..."
+        if sudo docker save "$image" -o "$tar_path" 2>&1; then
+            # Make the tar file readable by others
+            sudo chmod 644 "$tar_path"
+            
+            local size=$(du -h "$tar_path" | cut -f1)
+            log_success "Successfully saved Docker image: $image ($size)"
+            log_info "To load later: docker load -i $tar_path"
+            update_status "$image" "completed"
             return 0
         else
-            log_warn "HuggingFace download failed (exit code $exit_code)"
-            log_warn "Output: $output"
+            log_warn "Docker save failed"
+            # Clean up partial file
+            sudo rm -f "$tar_path"
             
             if [[ $attempt -lt $MAX_RETRIES ]]; then
                 log_info "Retrying in $RETRY_DELAY seconds..."
@@ -260,8 +362,8 @@ download_hf_model() {
         ((attempt++)) || true
     done
     
-    log_error "Failed to download HuggingFace model $repo_id after $MAX_RETRIES attempts"
-    update_status "$model_data" "failed" "Download failed after $MAX_RETRIES attempts"
+    log_error "Failed to save Docker image $image after $MAX_RETRIES attempts"
+    update_status "$image" "failed" "Docker save failed after $MAX_RETRIES attempts"
     return 1
 }
 
@@ -294,6 +396,12 @@ process_queue() {
         
         if [[ "$type" == "huggingface" ]]; then
             if download_hf_model "$model"; then
+                ((success++)) || true
+            else
+                ((failed++)) || true
+            fi
+        elif [[ "$type" == "docker" ]]; then
+            if download_docker_image "$model"; then
                 ((success++)) || true
             else
                 ((failed++)) || true
@@ -334,8 +442,9 @@ show_status() {
     # Type breakdown
     local ollama_pending=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM queue WHERE status = 'pending' AND (type = 'ollama' OR type IS NULL);")
     local hf_pending=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM queue WHERE status = 'pending' AND type = 'huggingface';")
+    local docker_pending=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM queue WHERE status = 'pending' AND type = 'docker';")
     
-    echo "  Pending:     $pending (Ollama: $ollama_pending, HuggingFace: $hf_pending)"
+    echo "  Pending:     $pending (Ollama: $ollama_pending, HuggingFace: $hf_pending, Docker: $docker_pending)"
     echo "  Downloading: $downloading"
     echo "  Completed:   $completed"
     echo "  Failed:      $failed"

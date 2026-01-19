@@ -546,6 +546,7 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
         # Optional parameters
         quant = data.get("quant", "Q4_K_M")
         model_name = data.get("name")  # Custom name for Ollama
+        convert = data.get("convert", True)  # Default to True for backwards compatibility
         
         # Check rate limit
         is_allowed, remaining = check_rate_limit(client_ip)
@@ -573,11 +574,13 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
             return
         
         # Add to queue with type='huggingface'
-        # Store quant and custom name in the model field as JSON or use a convention
-        model_data = repo_id
-        if quant != "Q4_K_M" or model_name:
-            # Store as JSON for extra params
-            model_data = json.dumps({"repo_id": repo_id, "quant": quant, "name": model_name})
+        # Always store as JSON to include all parameters
+        model_data = json.dumps({
+            "repo_id": repo_id,
+            "quant": quant,
+            "name": model_name,
+            "convert": convert
+        })
         
         cursor.execute("""
             INSERT INTO queue (model, type, requester_ip, status)
@@ -596,7 +599,73 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
             "status": "queued",
             "message": f"HuggingFace model {repo_id} added to download queue",
             "queue_id": queue_id,
-            "type": "huggingface"
+            "type": "huggingface",
+            "convert": convert
+        })
+    
+    def handle_docker_queue_request(self, body: bytes) -> None:
+        """Handle POST /api/docker/queue - queue a Docker image for download."""
+        client_ip = self.get_client_ip()
+        
+        try:
+            data = json.loads(body.decode())
+        except json.JSONDecodeError:
+            self.send_json_response(400, {"error": "Invalid JSON"})
+            return
+        
+        image = data.get("image") or data.get("name")
+        if not image:
+            self.send_json_response(400, {"error": "image name required"})
+            return
+        
+        # Normalize image name (add :latest if no tag)
+        if ":" not in image and "@" not in image:
+            image = f"{image}:latest"
+        
+        # Check rate limit
+        is_allowed, remaining = check_rate_limit(client_ip)
+        if not is_allowed:
+            self.send_json_response(429, {
+                "error": "Rate limit exceeded",
+                "message": f"Maximum {RATE_LIMIT} requests per day"
+            })
+            return
+        
+        # Check if already in queue
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM queue 
+            WHERE model = ? AND type = 'docker' AND status = 'pending'
+        """, (image,))
+        
+        if cursor.fetchone()[0] > 0:
+            conn.close()
+            self.send_json_response(200, {
+                "status": "already_queued",
+                "message": f"Docker image {image} is already in queue"
+            })
+            return
+        
+        # Add to queue with type='docker'
+        cursor.execute("""
+            INSERT INTO queue (model, type, requester_ip, status)
+            VALUES (?, 'docker', ?, 'pending')
+        """, (image, client_ip))
+        
+        queue_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        increment_rate_limit(client_ip)
+        
+        logger.info(f"Queued Docker image {image} (id={queue_id}) from {client_ip}")
+        
+        self.send_json_response(202, {
+            "status": "queued",
+            "message": f"Docker image {image} added to download queue",
+            "queue_id": queue_id,
+            "type": "docker"
         })
     
     def handle_pull_request(self, body: bytes) -> None:
@@ -794,6 +863,8 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
             self.handle_pull_request(body)
         elif self.path == "/api/hf/queue":
             self.handle_hf_queue_request(body)
+        elif self.path == "/api/docker/queue":
+            self.handle_docker_queue_request(body)
         else:
             self.proxy_request("POST", body)
     

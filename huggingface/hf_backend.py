@@ -366,6 +366,128 @@ def check_model(repo_id: str, token: Optional[str] = None) -> ModelInfo:
     return info
 
 
+def quick_check_model(repo_id: str, token: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Quick pre-flight check for a HuggingFace model.
+    
+    Returns a dict with:
+    - can_download: bool - Always True if repo exists
+    - can_convert: bool - True if GGUF available or architecture supported
+    - has_gguf: bool - True if repo has GGUF files
+    - gguf_repo: str or None - Alternative GGUF repo if found
+    - architecture: str or None - Model architecture
+    - warning: str or None - Warning message if not convertible
+    - error: str or None - Error if repo doesn't exist
+    """
+    result = {
+        "can_download": False,
+        "can_convert": False,
+        "has_gguf": False,
+        "gguf_files": [],
+        "gguf_repo": None,
+        "architecture": None,
+        "warning": None,
+        "error": None
+    }
+    
+    try:
+        info = check_model(repo_id, token)
+        
+        if info.error:
+            result["error"] = info.error
+            return result
+        
+        result["can_download"] = True
+        result["architecture"] = info.architecture
+        result["has_gguf"] = info.has_gguf
+        result["gguf_files"] = info.gguf_files
+        result["gguf_repo"] = info.gguf_repo
+        
+        if info.has_gguf or info.is_convertible:
+            result["can_convert"] = True
+        else:
+            result["warning"] = f"Architecture '{info.architecture}' is not supported for Ollama conversion. Model can still be downloaded."
+        
+        return result
+        
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+
+
+def download_only_model(
+    repo_id: str,
+    output_dir: Optional[Path] = None,
+    token: Optional[str] = None,
+    include_patterns: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Download a HuggingFace model without conversion.
+    
+    Downloads to /data/huggingface/models/<repo_name>/
+    
+    Args:
+        repo_id: HuggingFace repository ID
+        output_dir: Override output directory
+        token: HuggingFace token for gated models
+        include_patterns: File patterns to include (default: all)
+        
+    Returns:
+        Dict with status, path, and file list
+    """
+    if output_dir is None:
+        output_dir = Path("/data/huggingface/models") / repo_id.replace("/", "_")
+    else:
+        output_dir = Path(output_dir)
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    result = {
+        "status": "pending",
+        "repo_id": repo_id,
+        "path": str(output_dir),
+        "files": [],
+        "error": None
+    }
+    
+    logger.info(f"Downloading model {repo_id} to {output_dir}")
+    
+    # Use huggingface-cli for download
+    if shutil.which("huggingface-cli"):
+        cmd = [
+            "huggingface-cli", "download", repo_id,
+            "--local-dir", str(output_dir),
+            "--local-dir-use-symlinks", "False"
+        ]
+        
+        if include_patterns:
+            for pattern in include_patterns:
+                cmd.extend(["--include", pattern])
+        
+        if token:
+            cmd.extend(["--token", token])
+        
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=7200)
+            
+            # List downloaded files
+            result["files"] = [str(f.relative_to(output_dir)) for f in output_dir.rglob("*") if f.is_file()]
+            result["status"] = "completed"
+            logger.info(f"Downloaded {len(result['files'])} files to {output_dir}")
+            
+        except subprocess.CalledProcessError as e:
+            result["status"] = "failed"
+            result["error"] = f"Download failed: {e.stderr}"
+        except subprocess.TimeoutExpired:
+            result["status"] = "failed"
+            result["error"] = "Download timed out"
+    else:
+        result["status"] = "failed"
+        result["error"] = "huggingface-cli not available"
+    
+    return result
+
+
 # =============================================================================
 # GGUF Selection and Download Functions
 # =============================================================================
@@ -832,6 +954,7 @@ def process_huggingface_model(
     quant: str = DEFAULT_QUANT,
     token: Optional[str] = None,
     cleanup: bool = True,
+    convert: bool = True,
 ) -> Dict[str, Any]:
     """
     Full pipeline to process a HuggingFace model for Ollama.
@@ -847,6 +970,7 @@ def process_huggingface_model(
         quant: Quantization type for conversion
         token: Optional HuggingFace API token
         cleanup: Whether to clean up intermediate files
+        convert: If False, download only without Ollama import
 
     Returns:
         Dictionary with status, steps, and error information
@@ -865,6 +989,18 @@ def process_huggingface_model(
         model_name = model_name.strip('-')
 
     result.model_name = model_name
+
+    # If convert=False, just download the model
+    if not convert:
+        download_result = download_only_model(repo_id, token=token)
+        return {
+            "status": download_result["status"],
+            "steps": [{"name": "download_only", "status": download_result["status"], "details": download_result.get("path")}],
+            "error": download_result.get("error"),
+            "model_name": None,
+            "gguf_path": None,
+            "download_path": download_result.get("path")
+        }
 
     def add_step(name: str, status: str, details: Optional[str] = None):
         step = {"name": name, "status": status}
