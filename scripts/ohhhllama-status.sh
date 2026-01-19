@@ -173,6 +173,16 @@ try:
             print(f\"    • {model}\")
         if len(hf_pending) > 5:
             print(f\"    ... and {len(hf_pending) - 5} more\")
+    
+    docker_pending = [m for m in queue if m.get('status') == 'pending' and m.get('type') == 'docker']
+    
+    if docker_pending:
+        print()
+        print('  Docker images queued:')
+        for m in docker_pending[:5]:
+            print(f\"    • {m.get('model')}\")
+        if len(docker_pending) > 5:
+            print(f\"    ... and {len(docker_pending) - 5} more\")
 except Exception as e:
     print(f'  Could not fetch queue status: {e}')
 " 2>/dev/null
