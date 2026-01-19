@@ -454,6 +454,61 @@ def check_model_exists(model: str) -> bool:
     return False
 
 
+def validate_docker_image(image: str) -> tuple[bool, str | None]:
+    """
+    Validate that a Docker image exists on Docker Hub.
+    
+    Args:
+        image: Docker image name (e.g., "nginx:latest", "library/nginx")
+        
+    Returns:
+        Tuple of (exists, error_message). If exists is True, error_message is None.
+        On network/API errors, returns (True, None) to avoid blocking.
+    """
+    # Parse image name
+    if ":" in image:
+        name, tag = image.rsplit(":", 1)
+    else:
+        name, tag = image, "latest"
+    
+    # Handle digest references (@sha256:...) - skip validation
+    if "@" in name:
+        return True, None
+    
+    # Determine if it's an official image or user image
+    if "/" not in name:
+        url = f"https://hub.docker.com/v2/repositories/library/{name}/tags/{tag}"
+    else:
+        url = f"https://hub.docker.com/v2/repositories/{name}/tags/{tag}"
+    
+    try:
+        req = urllib.request.Request(url)
+        req.add_header("Accept", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                return True, None
+            
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False, f"Image '{image}' not found on Docker Hub"
+        elif e.code == 401:
+            return False, f"Image '{image}' requires authentication"
+        else:
+            logger.warning(f"Docker Hub API error {e.code} for {image}")
+            return True, None  # Don't block on API errors
+            
+    except urllib.error.URLError as e:
+        logger.warning(f"Could not reach Docker Hub: {e}")
+        return True, None  # Network error - don't block
+        
+    except Exception as e:
+        logger.warning(f"Docker validation error: {e}")
+        return True, None
+    
+    return True, None
+
+
 class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
     """HTTP request handler for the ohhhllama proxy."""
     
@@ -621,6 +676,16 @@ class OhhhllamaHandler(http.server.BaseHTTPRequestHandler):
         # Normalize image name (add :latest if no tag)
         if ":" not in image and "@" not in image:
             image = f"{image}:latest"
+        
+        # Validate image exists on Docker Hub
+        exists, error = validate_docker_image(image)
+        if not exists:
+            self.send_json_response(404, {
+                "error": "Image not found",
+                "message": error,
+                "image": image
+            })
+            return
         
         # Check rate limit
         is_allowed, remaining = check_rate_limit(client_ip)

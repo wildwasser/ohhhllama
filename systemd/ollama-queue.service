@@ -15,7 +15,7 @@ EnvironmentFile=-/opt/ohhhllama/ohhhllama.conf
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/var/lib/ohhhllama /data/huggingface /data/ollama
+ReadWritePaths=/var/lib/ohhhllama /data/huggingface /data/ollama /data/docker
 PrivateTmp=yes
 
 # Logging
