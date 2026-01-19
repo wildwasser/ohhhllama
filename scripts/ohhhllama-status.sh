@@ -798,8 +798,12 @@ else:
             if [[ "$line" == "PENDING_ITEMS" ]]; then
                 continue
             fi
-            if [[ "$line" == "DOWNLOADING" ]] || [[ "$line" == "NO_PENDING" ]] || [[ -z "$line" ]]; then
+            if [[ "$line" == "DOWNLOADING" ]] || [[ "$line" == "NO_PENDING" ]]; then
                 break
+            fi
+            # Skip empty lines instead of breaking
+            if [[ -z "$line" ]]; then
+                continue
             fi
             # Skip the counts line
             if [[ "$line" == Pending:* ]]; then
