@@ -156,7 +156,7 @@ try:
         print()
         print('  Ollama models queued:')
         for m in ollama_pending[:5]:
-            print(f\"    • {m.get('model')}\")
+            print(f\"    • {m.get('model') or m.get('image') or 'unknown'}\")
         if len(ollama_pending) > 5:
             print(f\"    ... and {len(ollama_pending) - 5} more\")
     
@@ -164,7 +164,7 @@ try:
         print()
         print('  HuggingFace models queued:')
         for m in hf_pending[:5]:
-            model = m.get('model', '')
+            model = m.get('model') or m.get('image') or ''
             if model.startswith('{'):
                 try:
                     md = json.loads(model)
@@ -180,7 +180,7 @@ try:
         print()
         print('  Docker images queued:')
         for m in docker_pending[:5]:
-            print(f\"    • {m.get('model')}\")
+            print(f\"    • {m.get('model') or m.get('image') or 'unknown'}\")
         if len(docker_pending) > 5:
             print(f\"    ... and {len(docker_pending) - 5} more\")
 except Exception as e:
@@ -716,7 +716,7 @@ pending = [m for m in queue if m.get('status') == 'pending']
 if pending:
     print('PENDING_ITEMS')
     for i, m in enumerate(pending, 1):
-        model = m.get('model', 'unknown')
+        model = m.get('model') or m.get('image') or 'unknown'
         mtype = m.get('type', 'ollama')
         created = m.get('created_at', '')[:16]
         
@@ -744,7 +744,7 @@ downloading = [m for m in queue if m.get('status') == 'downloading']
 if downloading:
     print('DOWNLOADING')
     for m in downloading:
-        model = m.get('model', 'unknown')
+        model = m.get('model') or m.get('image') or 'unknown'
         mtype = m.get('type', 'ollama')
         if model.startswith('{'):
             try:
@@ -772,7 +772,7 @@ d = json.load(sys.stdin)
 recent = d.get('recent', [])
 if recent:
     for m in recent[:10]:
-        model = m.get('model', 'unknown')
+        model = m.get('model') or m.get('image') or 'unknown'
         status = m.get('status', 'unknown')
         error = m.get('error', '')
         icon = '✓' if status == 'completed' else '✗'
@@ -836,7 +836,7 @@ d = json.load(sys.stdin)
 recent = d.get('recent', [])
 if recent:
     for m in recent[:5]:
-        model = m.get('model', 'unknown')
+        model = m.get('model') or m.get('image') or 'unknown'
         status = m.get('status', 'unknown')
         icon = '✓' if status == 'completed' else '✗'
         # Truncate long model names
@@ -1193,7 +1193,7 @@ try:
         print()
         for m in pending[:5]:
             mtype = m.get('type', 'ollama')
-            model = m.get('model', '')
+            model = m.get('model') or m.get('image') or ''
             if model.startswith('{'):
                 try:
                     md = json.loads(model)
